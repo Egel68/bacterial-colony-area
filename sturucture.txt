@@ -1,0 +1,14 @@
+bacteria_analyzer/
+├── main.py
+├── ui/
+│   ├── __init__.py
+│   ├── main_window.py
+│   ├── analysis_window.py
+│   └── styles.py
+├── analysis/
+│   ├── __init__.py
+│   ├── image_processor.py
+│   └── colony_detector.py
+└── utils/
+    ├── __init__.py
+    └── calculations.py
