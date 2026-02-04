@@ -3,7 +3,7 @@
 Содержит алгоритмы компьютерного зрения для сегментации.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -14,29 +14,27 @@ from .image_processor import ImageProcessor
 class ColonyDetector:
     """
     Класс для обнаружения чашки Петри и бактериальных колоний.
-
-    Алгоритм работы:
-    1. Обнаружение чашки Петри:
-       - Преобразование в grayscale
-       - Размытие для уменьшения шума
-       - Определение порога для отделения от тёмного фона
-       - Поиск контуров и определение наибольшего круглого объекта
-       - Использование HoughCircles для точного определения круга
-
-    2. Обнаружение колоний:
-       - Создание внутренней маски (с отступом от краёв чашки)
-       - Преобразование в цветовое пространство HSV
-       - Адаптивная пороговая обработка
-       - Выделение областей с характерной яркостью/цветом колоний
-       - Морфологическая очистка
-       - Фильтрация по размеру
     """
 
-    # Отступ от края чашки Петри в процентах от радиуса
     EDGE_MARGIN_PERCENT = 5
 
     def __init__(self):
         self.processor = ImageProcessor()
+
+    def _find_contours(self, mask: np.ndarray) -> List:
+        """
+        Обёртка для cv2.findContours, совместимая с разными версиями OpenCV.
+
+        Args:
+            mask: Бинарная маска
+
+        Returns:
+            Список контуров
+        """
+        result = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # OpenCV 4.x возвращает 2 значения, OpenCV 3.x - 3 значения
+        contours = result[0] if len(result) == 2 else result[1]
+        return contours
 
     def detect_petri_dish(
         self, image: np.ndarray
@@ -44,160 +42,121 @@ class ColonyDetector:
         """
         Обнаружение чашки Петри на изображении.
 
-        Алгоритм:
-        1. Преобразуем в grayscale и применяем размытие
-        2. Используем пороговую обработку для отделения от тёмного фона
-        3. Находим контуры
-        4. Ищем наибольший контур, похожий на круг
-        5. Вписываем минимальную окружность
-
         Args:
             image: Входное BGR изображение
 
         Returns:
             Tuple из (маска чашки Петри, информация о чашке)
         """
-        # Предобработка
         gray = self.processor.to_grayscale(image)
-        blurred = self.processor.apply_gaussian_blur(gray, kernel_size=7)
 
-        # Пробуем сначала метод HoughCircles - он более точный для кругов
+        # Метод 1: HoughCircles
         result = self._detect_petri_with_hough(image)
         if result[0] is not None:
             return result
 
-        # Если HoughCircles не сработал, пробуем контурный метод
-        # Метод: Пороговая обработка (для тёмного фона)
-        _, thresh = cv2.threshold(blurred, 30, 255, cv2.THRESH_BINARY)
+        # Метод 2: Контурный анализ
+        result = self._detect_petri_with_contours(image)
+        if result[0] is not None:
+            return result
 
-        # Морфологические операции для очистки
-        thresh = self.processor.apply_morphology(thresh, "close", kernel_size=15)
-        thresh = self.processor.apply_morphology(thresh, "open", kernel_size=5)
-
-        # Поиск контуров
-        contours, _ = cv2.findContours(
-            thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        if not contours:
-            return None, None
-
-        # Находим наибольший контур
-        largest_contour = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest_contour)
-
-        # Проверяем, достаточно ли большой контур
-        image_area = image.shape[0] * image.shape[1]
-        if area < image_area * 0.1:  # Менее 10% изображения
-            return None, None
-
-        # Вписываем окружность
-        (x, y), radius = cv2.minEnclosingCircle(largest_contour)
-        center = (int(x), int(y))
-        radius = int(radius)
-
-        # Проверяем "круглость" контура
-        perimeter = cv2.arcLength(largest_contour, True)
-        circularity = 4 * np.pi * area / (perimeter**2) if perimeter > 0 else 0
-
-        if circularity < 0.5:  # Контур недостаточно круглый
-            return None, None
-
-        # Создаём маску
-        mask = np.zeros(gray.shape, dtype=np.uint8)
-        cv2.circle(mask, center, radius, 255, -1)
-
-        petri_info = {
-            "center": center,
-            "radius": radius,
-            "area": np.pi * radius**2,
-            "circularity": circularity,
-        }
-
-        return mask, petri_info
+        return None, None
 
     def _detect_petri_with_hough(
         self, image: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
-        """
-        Обнаружение чашки Петри с помощью преобразования Хафа.
-
-        Args:
-            image: Входное BGR изображение
-
-        Returns:
-            Tuple из (маска чашки Петри, информация о чашке)
-        """
+        """Обнаружение чашки Петри с помощью преобразования Хафа."""
         gray = self.processor.to_grayscale(image)
         blurred = self.processor.apply_gaussian_blur(gray, kernel_size=9)
 
-        # Определяем минимальный и максимальный радиус
         min_dim = min(image.shape[:2])
         min_radius = int(min_dim * 0.15)
-        max_radius = int(min_dim * 0.48)
+        max_radius = int(min_dim * 0.49)
 
-        # Поиск кругов с разными параметрами
-        for param2 in [30, 50, 70, 20]:
-            circles = cv2.HoughCircles(
-                blurred,
-                cv2.HOUGH_GRADIENT,
-                dp=1.2,
-                minDist=min_dim // 2,
-                param1=50,
-                param2=param2,
-                minRadius=min_radius,
-                maxRadius=max_radius,
-            )
+        for param2 in [25, 35, 50, 20, 15]:
+            for dp in [1.0, 1.2, 1.5]:
+                circles = cv2.HoughCircles(
+                    blurred,
+                    cv2.HOUGH_GRADIENT,
+                    dp=dp,
+                    minDist=min_dim // 2,
+                    param1=50,
+                    param2=param2,
+                    minRadius=min_radius,
+                    maxRadius=max_radius,
+                )
 
-            if circles is not None:
-                break
+                if circles is not None:
+                    circle = circles[0][0]
+                    center = (int(circle[0]), int(circle[1]))
+                    radius = int(circle[2])
 
-        if circles is None:
+                    mask = np.zeros(gray.shape, dtype=np.uint8)
+                    cv2.circle(mask, center, radius, 255, -1)
+
+                    petri_info = {
+                        "center": center,
+                        "radius": radius,
+                        "area_px": int(np.pi * radius**2),
+                        "circularity": 1.0,
+                    }
+
+                    return mask, petri_info
+
+        return None, None
+
+    def _detect_petri_with_contours(
+        self, image: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
+        """Обнаружение чашки Петри через контурный анализ."""
+        gray = self.processor.to_grayscale(image)
+        blurred = self.processor.apply_gaussian_blur(gray, kernel_size=7)
+
+        _, thresh = cv2.threshold(blurred, 25, 255, cv2.THRESH_BINARY)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+        contours = self._find_contours(thresh)
+
+        if not contours:
             return None, None
 
-        # Берём первый (наиболее вероятный) круг
-        circle = circles[0][0]
-        center = (int(circle[0]), int(circle[1]))
-        radius = int(circle[2])
+        largest_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest_contour)
 
-        # Создаём маску
+        image_area = image.shape[0] * image.shape[1]
+        if area < image_area * 0.05:
+            return None, None
+
+        (x, y), radius = cv2.minEnclosingCircle(largest_contour)
+        center = (int(x), int(y))
+        radius = int(radius)
+
         mask = np.zeros(gray.shape, dtype=np.uint8)
         cv2.circle(mask, center, radius, 255, -1)
 
         petri_info = {
             "center": center,
             "radius": radius,
-            "area": np.pi * radius**2,
-            "circularity": 1.0,  # Идеальный круг
+            "area_px": int(np.pi * radius**2),
+            "circularity": 1.0,
         }
 
         return mask, petri_info
 
     def create_inner_mask(
-        self, petri_mask: np.ndarray, petri_info: Dict, margin_percent: float = None
+        self, petri_mask: np.ndarray, petri_info: Dict, margin_percent: float = 5
     ) -> np.ndarray:
         """
         Создание внутренней маски с отступом от краёв чашки Петри.
-        Это исключает края чашки из анализа колоний.
-
-        Args:
-            petri_mask: Маска чашки Петри
-            petri_info: Информация о чашке Петри
-            margin_percent: Отступ от края в процентах от радиуса
-
-        Returns:
-            Внутренняя маска
         """
-        if margin_percent is None:
-            margin_percent = self.EDGE_MARGIN_PERCENT
-
         center = petri_info["center"]
         radius = petri_info["radius"]
 
-        # Вычисляем внутренний радиус
         inner_radius = int(radius * (100 - margin_percent) / 100)
 
-        # Создаём внутреннюю маску
         inner_mask = np.zeros_like(petri_mask)
         cv2.circle(inner_mask, center, inner_radius, 255, -1)
 
@@ -215,15 +174,6 @@ class ColonyDetector:
         """
         Обнаружение бактериальных колоний.
 
-        Алгоритм:
-        1. Создаём внутреннюю маску (исключаем края чашки)
-        2. Применяем маску к изображению
-        3. Преобразуем в HSV для лучшего выделения колоний
-        4. Колонии обычно светлее агара (повышенная яркость)
-        5. Применяем адаптивную пороговую обработку
-        6. Очищаем морфологическими операциями
-        7. Фильтруем мелкие объекты
-
         Args:
             image: Входное BGR изображение
             petri_mask: Маска чашки Петри
@@ -235,88 +185,99 @@ class ColonyDetector:
         Returns:
             Бинарная маска колоний
         """
-        # Создаём внутреннюю маску (исключаем края чашки Петри)
+        # Создаём внутреннюю маску
         if petri_info is not None:
             inner_mask = self.create_inner_mask(
                 petri_mask, petri_info, edge_margin_percent
             )
         else:
-            # Если нет информации, используем эрозию
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
             inner_mask = cv2.erode(petri_mask, kernel, iterations=2)
 
-        # Применяем внутреннюю маску (исключаем края)
-        masked = cv2.bitwise_and(image, image, mask=inner_mask)
+        # Применяем внутреннюю маску к изображению
+        masked_image = cv2.bitwise_and(image, image, mask=inner_mask)
 
-        # Улучшаем контраст
-        enhanced = self.processor.enhance_contrast(masked)
+        # Преобразуем в grayscale
+        gray = cv2.cvtColor(masked_image, cv2.COLOR_BGR2GRAY)
 
         # Преобразуем в HSV
-        hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(masked_image, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
 
-        # Вычисляем средние значения яркости в области чашки Петри (без краёв)
-        inner_values = v[inner_mask > 0]
+        # Получаем статистику внутри чашки
+        inner_pixels = gray[inner_mask > 0]
 
-        if len(inner_values) == 0:
+        if len(inner_pixels) == 0:
             return np.zeros_like(petri_mask)
 
-        mean_v = np.mean(inner_values)
-        std_v = np.std(inner_values)
-        median_v = np.median(inner_values)
+        mean_brightness = np.mean(inner_pixels)
+        std_brightness = np.std(inner_pixels)
+        median_brightness = np.median(inner_pixels)
 
-        # Метод 1: Порог на основе статистики яркости
-        # Колонии светлее среднего агара
-        threshold_offset = std_v * (1.5 - sensitivity)
-        threshold_value = median_v + threshold_offset
+        # Список масок для комбинирования
+        colony_masks = []
 
-        # Ограничиваем порог разумными значениями
-        threshold_value = max(min(threshold_value, 250), mean_v + 5)
-
-        _, brightness_thresh = cv2.threshold(
-            v, int(threshold_value), 255, cv2.THRESH_BINARY
+        # Метод 1: Светлые колонии (светлее фона)
+        bright_threshold = median_brightness + std_brightness * (1.5 - sensitivity)
+        bright_threshold = max(bright_threshold, median_brightness + 10)
+        _, bright_mask = cv2.threshold(
+            gray, int(bright_threshold), 255, cv2.THRESH_BINARY
         )
+        bright_mask = cv2.bitwise_and(bright_mask, inner_mask)
+        colony_masks.append(bright_mask)
 
-        # Метод 2: Адаптивная пороговая обработка
-        block_size = max(11, int(101 * (1 - sensitivity * 0.7)))
+        # Метод 2: Тёмные колонии (темнее фона)
+        dark_threshold = median_brightness - std_brightness * (1.5 - sensitivity)
+        dark_threshold = min(dark_threshold, median_brightness - 10)
+        if dark_threshold > 5:
+            _, dark_mask = cv2.threshold(
+                gray, int(dark_threshold), 255, cv2.THRESH_BINARY_INV
+            )
+            dark_mask = cv2.bitwise_and(dark_mask, inner_mask)
+            # Исключаем чёрные области
+            _, non_black = cv2.threshold(gray, 5, 255, cv2.THRESH_BINARY)
+            dark_mask = cv2.bitwise_and(dark_mask, non_black)
+            colony_masks.append(dark_mask)
+
+        # Метод 3: Адаптивная пороговая обработка
+        block_size = max(11, int(151 * (1 - sensitivity * 0.7)))
         if block_size % 2 == 0:
             block_size += 1
 
-        c_value = max(3, int(20 * (1 - sensitivity)))
+        c_value = max(3, int(25 * (1 - sensitivity)))
 
-        adaptive_thresh = cv2.adaptiveThreshold(
-            v,
+        adaptive_bright = cv2.adaptiveThreshold(
+            gray,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY,
             block_size,
             -c_value,
         )
+        adaptive_bright = cv2.bitwise_and(adaptive_bright, inner_mask)
+        colony_masks.append(adaptive_bright)
 
-        # Метод 3: Обнаружение цветных колоний (высокая насыщенность)
-        s_mean = np.mean(s[inner_mask > 0])
-        s_std = np.std(s[inner_mask > 0])
-        s_threshold = s_mean + s_std * 0.5
+        # Метод 4: Цветные колонии (высокая насыщенность)
+        s_values = s[inner_mask > 0]
+        if len(s_values) > 0:
+            s_mean = np.mean(s_values)
+            s_std = np.std(s_values)
+            s_threshold = s_mean + s_std * (1 - sensitivity * 0.5)
+            _, color_mask = cv2.threshold(s, int(s_threshold), 255, cv2.THRESH_BINARY)
+            color_mask = cv2.bitwise_and(color_mask, inner_mask)
+            colony_masks.append(color_mask)
 
-        _, saturation_thresh = cv2.threshold(
-            s, int(s_threshold), 255, cv2.THRESH_BINARY
-        )
+        # Комбинируем результаты
+        combined = np.zeros_like(petri_mask)
 
-        # Комбинируем методы яркости
-        combined = cv2.bitwise_and(brightness_thresh, adaptive_thresh)
+        for mask in colony_masks:
+            cleaned = self._clean_mask(mask)
+            combined = cv2.bitwise_or(combined, cleaned)
 
-        # Добавляем цветные колонии
-        colored_colonies = cv2.bitwise_and(saturation_thresh, brightness_thresh)
-        combined = cv2.bitwise_or(combined, colored_colonies)
+        # Финальная очистка
+        combined = self._clean_mask(combined)
 
-        # Применяем ВНУТРЕННЮЮ маску (без краёв чашки!)
-        combined = cv2.bitwise_and(combined, inner_mask)
-
-        # Морфологическая очистка
-        combined = self.processor.apply_morphology(combined, "open", kernel_size=3)
-        combined = self.processor.apply_morphology(combined, "close", kernel_size=3)
-
-        # Удаляем объекты, которые касаются границы внутренней маски
+        # Удаляем объекты на границе
         combined = self._remove_border_objects(combined, inner_mask)
 
         # Фильтрация по размеру
@@ -324,32 +285,28 @@ class ColonyDetector:
 
         return filtered
 
+    def _clean_mask(self, mask: np.ndarray) -> np.ndarray:
+        """Очистка маски морфологическими операциями."""
+        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+        cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_small)
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
+
+        return cleaned
+
     def _remove_border_objects(
         self, mask: np.ndarray, region_mask: np.ndarray
     ) -> np.ndarray:
-        """
-        Удаление объектов, касающихся границы области.
-
-        Args:
-            mask: Бинарная маска объектов
-            region_mask: Маска области
-
-        Returns:
-            Очищенная маска
-        """
-        # Создаём контур области
-        contours, _ = cv2.findContours(
-            region_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        """Удаление объектов, касающихся границы области."""
+        contours = self._find_contours(region_mask)
 
         if not contours:
             return mask
 
-        # Создаём маску границы (кольцо)
         border_mask = np.zeros_like(region_mask)
-        cv2.drawContours(border_mask, contours, -1, 255, thickness=15)
+        cv2.drawContours(border_mask, contours, -1, 255, thickness=10)
 
-        # Находим компоненты, которые касаются границы
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
             mask, connectivity=8
         )
@@ -358,36 +315,22 @@ class ColonyDetector:
 
         for i in range(1, num_labels):
             component_mask = (labels == i).astype(np.uint8) * 255
-
-            # Проверяем, касается ли компонент границы
             overlap = cv2.bitwise_and(component_mask, border_mask)
 
             if np.count_nonzero(overlap) == 0:
-                # Компонент не касается границы - оставляем
                 result = cv2.bitwise_or(result, component_mask)
 
         return result
 
     def _filter_by_size(self, mask: np.ndarray, min_size: int) -> np.ndarray:
-        """
-        Фильтрация объектов по размеру.
-
-        Args:
-            mask: Бинарная маска
-            min_size: Минимальный размер объекта
-
-        Returns:
-            Отфильтрованная маска
-        """
-        # Находим все связные компоненты
+        """Фильтрация объектов по размеру."""
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
             mask, connectivity=8
         )
 
-        # Создаём новую маску
         filtered = np.zeros_like(mask)
 
-        for i in range(1, num_labels):  # Пропускаем фон (0)
+        for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
             if area >= min_size:
                 filtered[labels == i] = 255
@@ -395,16 +338,8 @@ class ColonyDetector:
         return filtered
 
     def count_colonies(self, colony_mask: np.ndarray) -> int:
-        """
-        Подсчёт количества отдельных колоний.
-
-        Args:
-            colony_mask: Бинарная маска колоний
-
-        Returns:
-            Количество колоний
-        """
+        """Подсчёт количества отдельных колоний."""
         num_labels, _, _, _ = cv2.connectedComponentsWithStats(
             colony_mask, connectivity=8
         )
-        return num_labels - 1  # Вычитаем фон
+        return num_labels - 1
