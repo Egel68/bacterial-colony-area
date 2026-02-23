@@ -361,15 +361,16 @@ class AnalysisWindow(QMainWindow):
 
         self.status_label.setText("Анализ колоний...")
 
+        # Считываем параметры UI
         sensitivity = self.slider_sens.value() / 100.0
         contrast = self.slider_contrast.value() / 10.0
         min_size = self.spin_min_size.value()
-        margin = self.spin_margin.value()
+        margin = self.spin_margin.value()  # <--- Вот этот параметр
 
-        # Новые параметры
         use_solid_fill = self.chk_solid_fill.isChecked()
         fill_strength = self.spin_fill_strength.value()
 
+        # Детекция...
         self.colony_mask, self.debug_images = self.detector.detect_colonies(
             self.original_image,
             self.petri_mask,
@@ -379,19 +380,23 @@ class AnalysisWindow(QMainWindow):
             edge_margin_percent=margin,
             contrast_level=contrast,
             blur_size=5,
-            # Передача новых параметров
             use_solid_fill=use_solid_fill,
             fill_strength=fill_strength,
         )
 
+        # Расчет площади с передачей margin_percent
         self.analysis_results = self.calculator.calculate_areas(
-            self.petri_mask, self.colony_mask, self.petri_info
+            self.petri_mask,
+            self.colony_mask,
+            self.petri_info,
+            margin_percent=margin,  # <--- ПЕРЕДАЕМ СЮДА
         )
 
+        # Вывод результатов...
         res = self.analysis_results
         text = (
             f"Количество колоний: {res['colony_count']}\n"
-            f"Покрытие чашки: {res['coverage_percent']:.2f}%\n"
+            f"Покрытие (рабочей зоны): {res['coverage_percent']:.2f}%\n"
             f"Площадь колоний: {res['colony_area_px']} px"
         )
         self.text_results.setText(text)
