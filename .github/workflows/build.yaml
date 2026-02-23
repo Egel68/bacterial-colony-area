@@ -1,4 +1,4 @@
-name: Build Executable with PyInstaller
+name: Build BacteriaAnalyzer
 
 on:
   push:
@@ -29,20 +29,50 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
+      # Шаг сборки для Linux (разделитель путей :)
+      - name: Build executable (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          pyinstaller gui.py --onefile --noconsole
+          pyinstaller \
+            --onefile \
+            --windowed \
+            --name=BacteriaAnalyzer \
+            --icon=icon.ico \
+            --add-data="ui:ui" \
+            --add-data="analysis:analysis" \
+            --add-data="utils:utils" \
+            --hidden-import=PyQt6.sip \
+            --hidden-import=cv2 \
+            --hidden-import=numpy \
+            main.py
+
+      # Шаг сборки для Windows (разделитель путей ;)
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name=BacteriaAnalyzer `
+            --icon=icon.ico `
+            --add-data="ui;ui" `
+            --add-data="analysis;analysis" `
+            --add-data="utils;utils" `
+            --hidden-import=PyQt6.sip `
+            --hidden-import=cv2 `
+            --hidden-import=numpy `
+            main.py
 
       - name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: executable-linux
-          path: dist/gui
+          name: BacteriaAnalyzer-Linux
+          path: dist/BacteriaAnalyzer
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: executable-windows
-          path: dist/gui.exe
+          name: BacteriaAnalyzer-Windows
+          path: dist/BacteriaAnalyzer.exe
