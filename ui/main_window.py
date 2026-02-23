@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         """Инициализация пользовательского интерфейса."""
         self.setWindowTitle("Bacteria Colony Analyzer")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(900, 500)
         self.resize(700, 450)
 
         # Центральный виджет

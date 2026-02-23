@@ -6,7 +6,7 @@
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -36,8 +35,6 @@ from utils.calculations import AreaCalculator
 
 
 class ImageLabel(QLabel):
-    """Виджет для отображения изображения с масштабированием."""
-
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -63,35 +60,27 @@ class ImageLabel(QLabel):
 
 
 class AnalysisWindow(QMainWindow):
-    """Окно для анализа изображения бактериальных колоний."""
-
     def __init__(self, image_path: str, parent=None):
         super().__init__(parent)
         self.image_path = image_path
 
-        # Инициализация анализаторов
         self.processor = ImageProcessor()
         self.detector = ColonyDetector()
         self.calculator = AreaCalculator()
 
-        # Данные изображения
         self.original_image = None
-        self.display_image = None  # То, что сейчас на экране (RGB)
+        self.display_image = None
 
-        # Результаты анализа
         self.petri_mask = None
         self.colony_mask = None
-        self.petri_info = None  # {center: (x,y), radius: r}
+        self.petri_info = None
         self.analysis_results = None
-        self.debug_images = {}  # Словарь для хранения промежуточных этапов
+        self.debug_images = {}
 
-        # Флаги для блокировки повторных вызовов при обновлении UI
         self._updating_ui = False
 
         self._load_image()
         self._init_ui()
-
-        # Первый запуск - полный анализ
         self._run_full_analysis()
 
     def _load_image(self):
@@ -101,18 +90,16 @@ class AnalysisWindow(QMainWindow):
         self.display_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
 
     def _init_ui(self):
-        self.setWindowTitle("Анализ бактериальных колоний - Расширенный режим")
-        self.resize(1400, 900)
+        self.setWindowTitle("Анализ бактериальных колоний")
+        self.resize(1400, 950)  # Немного увеличим высоту
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
         main_layout = QHBoxLayout(central_widget)
 
-        # Левая часть - Изображение
         self._create_image_panel(main_layout)
 
-        # Правая часть - Управление (Scroll Area)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFixedWidth(450)
@@ -122,12 +109,11 @@ class AnalysisWindow(QMainWindow):
         self.controls_layout = QVBoxLayout(controls_widget)
         self.controls_layout.setSpacing(15)
 
-        # Секции управления
-        self._create_view_controls(self.controls_layout)  # Режимы просмотра
-        self._create_geometry_controls(self.controls_layout)  # Ручная коррекция круга
-        self._create_algorithm_controls(self.controls_layout)  # Параметры детекции
-        self._create_results_panel(self.controls_layout)  # Текст результатов
-        self._create_action_buttons(self.controls_layout)  # Кнопки
+        self._create_view_controls(self.controls_layout)
+        self._create_geometry_controls(self.controls_layout)
+        self._create_algorithm_controls(self.controls_layout)
+        self._create_results_panel(self.controls_layout)
+        self._create_action_buttons(self.controls_layout)
 
         self.controls_layout.addStretch()
         scroll.setWidget(controls_widget)
@@ -158,7 +144,6 @@ class AnalysisWindow(QMainWindow):
         layout.addWidget(image_frame, stretch=2)
 
     def _create_view_controls(self, layout: QVBoxLayout):
-        """Панель выбора режима просмотра."""
         group = QGroupBox("👁️ Режим просмотра")
         l = QVBoxLayout(group)
 
@@ -174,7 +159,6 @@ class AnalysisWindow(QMainWindow):
         self.view_mode_combo.currentIndexChanged.connect(self._update_display)
         l.addWidget(self.view_mode_combo)
 
-        # Чекбоксы оверлеев
         self.show_petri_contour = QCheckBox("Показать контур чашки")
         self.show_petri_contour.setChecked(True)
         self.show_petri_contour.stateChanged.connect(self._update_display)
@@ -188,32 +172,27 @@ class AnalysisWindow(QMainWindow):
         layout.addWidget(group)
 
     def _create_geometry_controls(self, layout: QVBoxLayout):
-        """Панель ручной коррекции геометрии чашки."""
         group = QGroupBox("📏 Геометрия чашки")
         l = QFormLayout(group)
 
-        # X Center
         self.spin_x = QSpinBox()
         self.spin_x.setRange(0, 5000)
         self.spin_x.setSuffix(" px")
         self.spin_x.valueChanged.connect(self._on_geometry_changed)
         l.addRow("Центр X:", self.spin_x)
 
-        # Y Center
         self.spin_y = QSpinBox()
         self.spin_y.setRange(0, 5000)
         self.spin_y.setSuffix(" px")
         self.spin_y.valueChanged.connect(self._on_geometry_changed)
         l.addRow("Центр Y:", self.spin_y)
 
-        # Radius
         self.spin_radius = QSpinBox()
         self.spin_radius.setRange(10, 3000)
         self.spin_radius.setSuffix(" px")
         self.spin_radius.valueChanged.connect(self._on_geometry_changed)
         l.addRow("Радиус:", self.spin_radius)
 
-        # Кнопка сброса к авто-детекции
         btn_reset = QPushButton("Сбросить к авто-поиску")
         btn_reset.setStyleSheet(
             "background-color: #45475a; font-size: 11px; padding: 5px;"
@@ -224,12 +203,11 @@ class AnalysisWindow(QMainWindow):
         layout.addWidget(group)
 
     def _create_algorithm_controls(self, layout: QVBoxLayout):
-        """Панель настроек алгоритма."""
         group = QGroupBox("⚙️ Параметры алгоритма")
         l = QVBoxLayout(group)
 
         # Чувствительность
-        l.addWidget(QLabel("Чувствительность обнаружения:"))
+        l.addWidget(QLabel("Чувствительность:"))
         h_sens = QHBoxLayout()
         self.slider_sens = QSlider(Qt.Orientation.Horizontal)
         self.slider_sens.setRange(1, 100)
@@ -246,8 +224,8 @@ class AnalysisWindow(QMainWindow):
         l.addWidget(QLabel("Усиление контраста:"))
         h_cont = QHBoxLayout()
         self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
-        self.slider_contrast.setRange(5, 30)  # 0.5x to 3.0x
-        self.slider_contrast.setValue(10)  # 1.0x
+        self.slider_contrast.setRange(5, 30)
+        self.slider_contrast.setValue(10)
         self.slider_contrast.valueChanged.connect(
             lambda v: self.label_contrast.setText(f"{v / 10:.1f}x")
         )
@@ -256,6 +234,13 @@ class AnalysisWindow(QMainWindow):
         h_cont.addWidget(self.label_contrast)
         l.addLayout(h_cont)
 
+        # Отступ
+        l.addWidget(QLabel("Отступ от края (%):"))
+        self.spin_margin = QDoubleSpinBox()
+        self.spin_margin.setRange(0, 30)
+        self.spin_margin.setValue(8.0)
+        l.addWidget(self.spin_margin)
+
         # Мин размер
         l.addWidget(QLabel("Мин. размер колонии (px):"))
         self.spin_min_size = QSpinBox()
@@ -263,17 +248,37 @@ class AnalysisWindow(QMainWindow):
         self.spin_min_size.setValue(50)
         l.addWidget(self.spin_min_size)
 
-        # Отступ
-        l.addWidget(QLabel("Отступ от края (%):"))
-        self.spin_margin = QDoubleSpinBox()
-        self.spin_margin.setRange(0, 20)
-        self.spin_margin.setValue(8.0)
-        l.addWidget(self.spin_margin)
+        # --- Секция сплошных зон (НОВАЯ) ---
+        l.addSpacing(10)
+        fill_frame = QFrame()
+        fill_frame.setStyleSheet(
+            "background-color: #313244; border-radius: 6px; padding: 5px;"
+        )
+        fill_layout = QVBoxLayout(fill_frame)
 
-        # Кнопка ПРИМЕНИТЬ
+        self.chk_solid_fill = QCheckBox("💧 Заполнять сплошные зоны")
+        self.chk_solid_fill.setToolTip(
+            "Включите для сплошных мазков бактерий. Выключите для отдельных мелких колоний."
+        )
+        fill_layout.addWidget(self.chk_solid_fill)
+
+        fill_h = QHBoxLayout()
+        fill_h.addWidget(QLabel("Сила заполнения:"))
+        self.spin_fill_strength = QSpinBox()
+        self.spin_fill_strength.setRange(1, 100)
+        self.spin_fill_strength.setValue(15)
+        self.spin_fill_strength.setToolTip(
+            "Радиус объединения. Увеличьте, если остаются черные дыры внутри пятен."
+        )
+        fill_h.addWidget(self.spin_fill_strength)
+        fill_layout.addLayout(fill_h)
+
+        l.addWidget(fill_frame)
+        # ------------------------------------
+
         btn_apply = QPushButton("🔄 Пересчитать")
         btn_apply.setStyleSheet(
-            "background-color: #89b4fa; color: #1e1e2e; font-weight: bold;"
+            "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; margin-top: 10px;"
         )
         btn_apply.clicked.connect(self._run_colony_analysis_only)
         l.addWidget(btn_apply)
@@ -303,31 +308,22 @@ class AnalysisWindow(QMainWindow):
     # --- ЛОГИКА ---
 
     def _run_full_analysis(self):
-        """Полный цикл: поиск чашки -> поиск колоний."""
         self.status_label.setText("Поиск чашки Петри...")
-
-        # 1. Ищем чашку
         self.petri_mask, self.petri_info = self.detector.detect_petri_dish(
             self.original_image
         )
 
         if self.petri_info:
-            # Обновляем спинбоксы геометрии (без вызова сигнала changed)
             self._updating_ui = True
             self.spin_x.setValue(self.petri_info["center"][0])
             self.spin_y.setValue(self.petri_info["center"][1])
             self.spin_radius.setValue(self.petri_info["radius"])
             self._updating_ui = False
-
-            # 2. Ищем колонии
             self._run_colony_analysis_only()
         else:
             QMessageBox.warning(
-                self,
-                "Ошибка",
-                "Чашка Петри не найдена. Попробуйте настроить параметры вручную.",
+                self, "Ошибка", "Чашка Петри не найдена. Настройте вручную."
             )
-            # Даже если не нашли, инициализируем дефолтные значения в центре
             h, w = self.original_image.shape[:2]
             self.petri_info = {
                 "center": (w // 2, h // 2),
@@ -341,54 +337,39 @@ class AnalysisWindow(QMainWindow):
             self._updating_ui = False
 
     def _on_geometry_changed(self):
-        """Вызывается когда юзер крутит спинбоксы координат."""
         if self._updating_ui:
             return
-
-        # Обновляем инфо о чашке из спинбоксов
         cx = self.spin_x.value()
         cy = self.spin_y.value()
         r = self.spin_radius.value()
-
         self.petri_info = {
             "center": (cx, cy),
             "radius": r,
             "area_px": int(np.pi * r**2),
         }
-
-        # Пересоздаем маску чашки
         h, w = self.original_image.shape[:2]
         self.petri_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(self.petri_mask, (cx, cy), r, 255, -1)
-
-        # Перезапускаем анализ колоний (не полный, чашку искать не надо)
-        # Делаем с небольшой задержкой или просто обновляем UI,
-        # но для простоты здесь вызовем анализ
-        # (В идеале здесь нужен QTimer, чтобы не лагало при прокрутке, но пока так)
-        pass
-        # Примечание: лучше пусть пользователь нажмет "Пересчитать",
-        # иначе при прокрутке спинбокса будет лаг.
-        # Однако контур чашки обновить стоит.
         self._update_display()
 
     def _reset_geometry(self):
         self._run_full_analysis()
 
     def _run_colony_analysis_only(self):
-        """Запуск только этапа поиска колоний (используя текущую маску чашки)."""
         if not self.petri_info:
             return
 
         self.status_label.setText("Анализ колоний...")
 
-        # Считываем параметры
         sensitivity = self.slider_sens.value() / 100.0
         contrast = self.slider_contrast.value() / 10.0
         min_size = self.spin_min_size.value()
         margin = self.spin_margin.value()
 
-        # Запускаем детектор
-        # ВНИМАНИЕ: detect_colonies теперь возвращает tuple (mask, debug_dict)
+        # Новые параметры
+        use_solid_fill = self.chk_solid_fill.isChecked()
+        fill_strength = self.spin_fill_strength.value()
+
         self.colony_mask, self.debug_images = self.detector.detect_colonies(
             self.original_image,
             self.petri_mask,
@@ -398,14 +379,15 @@ class AnalysisWindow(QMainWindow):
             edge_margin_percent=margin,
             contrast_level=contrast,
             blur_size=5,
+            # Передача новых параметров
+            use_solid_fill=use_solid_fill,
+            fill_strength=fill_strength,
         )
 
-        # Считаем статистику
         self.analysis_results = self.calculator.calculate_areas(
             self.petri_mask, self.colony_mask, self.petri_info
         )
 
-        # Выводим текст
         res = self.analysis_results
         text = (
             f"Количество колоний: {res['colony_count']}\n"
@@ -418,18 +400,14 @@ class AnalysisWindow(QMainWindow):
         self._update_display()
 
     def _update_display(self):
-        """Отрисовка в зависимости от выбранного режима."""
         if self.original_image is None:
             return
 
         mode = self.view_mode_combo.currentIndex()
-        # 0: Result, 1: Original, 2: Preprocessed, 3: Binary
-
         final_img = None
 
         if mode == 1:  # Original
             final_img = self.original_image.copy()
-            # Контуры рисуем только если попросили
             if self.show_petri_contour.isChecked() and self.petri_info:
                 cv2.circle(
                     final_img,
@@ -442,29 +420,25 @@ class AnalysisWindow(QMainWindow):
 
         elif mode == 2:  # Preprocessed
             if "preprocessed" in self.debug_images:
-                # Это grayscale изображение
                 gray = self.debug_images["preprocessed"]
                 final_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                self.image_header.setText("Усиленный контраст + Вычитание фона")
+                self.image_header.setText("Усиленный контраст")
             else:
                 final_img = self.original_image.copy()
 
         elif mode == 3:  # Binary
             if "binary" in self.debug_images:
-                # Маска
                 mask = self.debug_images["binary"]
                 final_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-                self.image_header.setText("Бинарная маска (без фильтрации по размеру)")
+                self.image_header.setText("Бинарная маска")
             else:
                 final_img = np.zeros_like(self.original_image)
 
-        else:  # 0: Result (Overlay)
+        else:  # Result
             final_img = self.original_image.copy()
             self.image_header.setText("Результат анализа")
 
-            # Рисуем чашку
             if self.show_petri_contour.isChecked() and self.petri_info:
-                # Внешний контур
                 cv2.circle(
                     final_img,
                     self.petri_info["center"],
@@ -472,27 +446,21 @@ class AnalysisWindow(QMainWindow):
                     (100, 100, 255),
                     2,
                 )
-                # Внутренний (ROI)
                 margin = self.spin_margin.value()
                 r_inner = int(self.petri_info["radius"] * (100 - margin) / 100)
                 cv2.circle(
                     final_img, self.petri_info["center"], r_inner, (255, 255, 0), 1
                 )
 
-            # Рисуем колонии
             if self.show_area_overlay.isChecked() and self.colony_mask is not None:
-                # Зеленая заливка
                 overlay = final_img.copy()
-                overlay[self.colony_mask > 0] = [0, 255, 0]  # BGR
+                overlay[self.colony_mask > 0] = [0, 255, 0]
                 cv2.addWeighted(overlay, 0.4, final_img, 0.6, 0, final_img)
-
-                # Контуры колоний
                 cnts, _ = cv2.findContours(
                     self.colony_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
                 )
                 cv2.drawContours(final_img, cnts, -1, (0, 255, 0), 1)
 
-        # Конвертация в QPixmap
         h, w, ch = final_img.shape
         bytes_per_line = ch * w
         rgb_image = cv2.cvtColor(final_img, cv2.COLOR_BGR2RGB)
@@ -506,7 +474,4 @@ class AnalysisWindow(QMainWindow):
             self, "Сохранить", "result.png", "Images (*.png *.jpg)"
         )
         if file_path:
-            pixmap = self.image_label.pixmap()
-            if pixmap:
-                pixmap.save(file_path)
-                QMessageBox.information(self, "Успех", "Изображение сохранено")
+            self.image_label.pixmap().save(file_path)
