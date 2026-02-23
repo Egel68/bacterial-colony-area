@@ -534,7 +534,7 @@ class AnalysisWindow(QMainWindow):
             "│ 📐 ОТНОСИТЕЛЬНАЯ ПЛОЩАДЬ            │",
             "├─────────────────────────────────────┤",
             f"│ Покрытие: {results['coverage_percent']:>14.2f} %     │",
-            f"│ Доля: {results['relative_area']:>18.4f}      │",
+            f"│ Доля: {results['area_ratio']:>18.4f}      │",
             "└─────────────────────────────────────┘",
         ]
 
@@ -546,7 +546,7 @@ class AnalysisWindow(QMainWindow):
                     "│ 📏 СРЕДНИЙ РАЗМЕР КОЛОНИИ           │",
                     "├─────────────────────────────────────┤",
                     f"│ Площадь: {results['avg_colony_area_px']:>12.1f} px      │",
-                    f"│ Площадь: {results['avg_colony_area_mm2']:>12.4f} мм²     │",
+                    f"│ Средняя площадь: {results['avg_colony_area_mm2']:>10.4f} мм²  │",
                     "└─────────────────────────────────────┘",
                 ]
             )

@@ -16,124 +16,61 @@ class ImageProcessor:
     def preprocess_image(image: np.ndarray) -> np.ndarray:
         """
         Предобработка изображения для анализа.
-
-        Args:
-            image: Входное BGR изображение
-
-        Returns:
-            Предобработанное изображение
         """
-        # Уменьшение шума с сохранением краёв
-        denoised = cv2.bilateralFilter(image, 9, 75, 75)
+        # Медианный фильтр хорошо убирает соль-перец шум, сохраняя края
+        denoised = cv2.medianBlur(image, 3)
         return denoised
 
     @staticmethod
-    def enhance_contrast(image: np.ndarray) -> np.ndarray:
+    def apply_clahe(
+        image: np.ndarray, clip_limit: float = 2.0, grid_size: int = 8
+    ) -> np.ndarray:
         """
-        Улучшение контраста изображения.
-
-        Args:
-            image: Входное BGR изображение
-
-        Returns:
-            Изображение с улучшенным контрастом
+        Применение CLAHE (Contrast Limited Adaptive Histogram Equalization).
+        Отлично подходит для выделения деталей на темном фоне.
         """
-        # Конвертируем в LAB
-        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image
 
-        # Применяем CLAHE к каналу яркости
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-
-        # Собираем обратно
-        enhanced = cv2.merge([l, a, b])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-        return enhanced
+        clahe = cv2.createCLAHE(
+            clipLimit=clip_limit, tileGridSize=(grid_size, grid_size)
+        )
+        return clahe.apply(gray)
 
     @staticmethod
     def to_grayscale(image: np.ndarray) -> np.ndarray:
-        """
-        Конвертация в оттенки серого.
-
-        Args:
-            image: Входное BGR изображение
-
-        Returns:
-            Grayscale изображение
-        """
         if len(image.shape) == 2:
             return image
         return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     @staticmethod
-    def apply_gaussian_blur(image: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+    def extract_green_channel(image: np.ndarray) -> np.ndarray:
         """
-        Применение размытия по Гауссу.
-
-        Args:
-            image: Входное изображение
-            kernel_size: Размер ядра (должен быть нечётным)
-
-        Returns:
-            Размытое изображение
+        Извлечение зеленого канала (часто наиболее контрастен для био-изображений).
         """
-        if kernel_size % 2 == 0:
-            kernel_size += 1
-        return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+        if len(image.shape) == 3:
+            return image[:, :, 1]
+        return image
 
     @staticmethod
-    def apply_morphology(
-        mask: np.ndarray,
-        operation: str = "close",
-        kernel_size: int = 5,
-        iterations: int = 1,
-    ) -> np.ndarray:
+    def apply_tophat(image: np.ndarray, kernel_size: int = 15) -> np.ndarray:
         """
-        Применение морфологических операций.
-
-        Args:
-            mask: Бинарная маска
-            operation: Тип операции ('open', 'close', 'erode', 'dilate')
-            kernel_size: Размер ядра
-            iterations: Количество итераций
-
-        Returns:
-            Обработанная маска
+        Применение преобразования Top-Hat.
+        Выделяет светлые объекты на темном фоне, игнорируя градиенты освещения.
         """
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
         )
-
-        operations = {
-            "open": cv2.MORPH_OPEN,
-            "close": cv2.MORPH_CLOSE,
-            "erode": cv2.MORPH_ERODE,
-            "dilate": cv2.MORPH_DILATE,
-        }
-
-        if operation in operations:
-            return cv2.morphologyEx(
-                mask, operations[operation], kernel, iterations=iterations
-            )
-
-        return mask
+        # TopHat = src - open(src)
+        return cv2.morphologyEx(image, cv2.MORPH_TOPHAT, kernel)
 
     @staticmethod
     def resize_image(
         image: np.ndarray, max_dimension: int = 1024
     ) -> Tuple[np.ndarray, float]:
-        """
-        Изменение размера изображения с сохранением пропорций.
-
-        Args:
-            image: Входное изображение
-            max_dimension: Максимальный размер по любой стороне
-
-        Returns:
-            Tuple из (изменённое изображение, коэффициент масштабирования)
-        """
+        """Изменение размера изображения с сохранением пропорций."""
         h, w = image.shape[:2]
 
         if max(h, w) <= max_dimension:
