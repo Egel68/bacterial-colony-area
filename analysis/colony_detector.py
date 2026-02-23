@@ -141,13 +141,11 @@ class ColonyDetector:
     ) -> np.ndarray:
         """
         Создание внутренней маски.
-        Критически важно отступить от края, чтобы убрать блики кольцевой лампы.
         """
         center = petri_info["center"]
         radius = petri_info["radius"]
 
-        # Увеличиваем отступ, так как блики обычно широкие
-        real_margin = max(margin_percent, 8.0)
+        real_margin = max(margin_percent, 1.0)
 
         inner_radius = int(radius * (100 - real_margin) / 100)
         inner_mask = np.zeros_like(petri_mask)
@@ -162,14 +160,11 @@ class ColonyDetector:
         sensitivity: float = 0.5,
         min_colony_size: int = 50,
         edge_margin_percent: float = 10,
-    ) -> np.ndarray:
+        contrast_level: float = 1.0,  # <--- НОВЫЙ ПАРАМЕТР
+        blur_size: int = 5,  # <--- НОВЫЙ ПАРАМЕТР
+    ) -> Tuple[np.ndarray, Dict]:  # <--- Возвращает Tuple (маска, словарь)
         """
         Обнаружение колоний.
-
-        Стратегия:
-        1. Работаем в зеленом канале (лучший контраст для ч/б камер и большинства агаров).
-        2. Применяем CLAHE для выравнивания освещения.
-        3. Используем пороговое значение + морфологию.
         """
         # 1. Подготовка маски ROI (области интереса)
         if petri_info:
@@ -179,67 +174,71 @@ class ColonyDetector:
         else:
             roi_mask = petri_mask
 
-        # 2. Работаем с изображением
-        # Используем зеленый канал, он обычно менее шумный чем синий и контрастнее красного для белого на черном
+        # 2. Работаем с изображением (Зеленый канал обычно самый четкий)
         channel = self.processor.extract_green_channel(image)
 
         # 3. Улучшение контраста (CLAHE)
-        # ClipLimit влияет на чувствительность (больше = больше деталей, но и шума)
-        # Sensitivity 0.0 -> Clip 1.0, Sensitivity 1.0 -> Clip 6.0
-        clip_limit = 1.0 + (sensitivity * 5.0)
+        # Базовый clip = 2.0, умножаем на пользовательский уровень
+        clip_limit = 2.0 * contrast_level
         enhanced = self.processor.apply_clahe(
             channel, clip_limit=clip_limit, grid_size=8
         )
 
-        # 4. Подавление фона (Morphological Top-Hat не подходит для крупных мазков,
-        # поэтому используем вычитание размытого фона для удаления градиента)
-        bg = cv2.GaussianBlur(enhanced, (51, 51), 0)
-        # Добавляем 128, чтобы не уйти в минус при вычитании, потом нормализуем
-        diff = cv2.addWeighted(enhanced, 1.5, bg, -0.5, 0)
+        # 4. Подавление фона и вычитание
+        # Используем blur_size из настроек (должен быть нечетным)
+        k_size = blur_size if blur_size % 2 == 1 else blur_size + 1
+        k_size = max(3, k_size)
 
-        # Применяем маску ROI сразу, чтобы блики не влияли на гистограмму
+        # Предварительное шумоподавление
+        denoised = cv2.medianBlur(enhanced, k_size)
+
+        # Оценка фона (очень сильное размытие)
+        bg = cv2.GaussianBlur(denoised, (51, 51), 0)
+
+        # Вычитание фона: результат = оригинал - фон
+        # addWeighted: src1*alpha + src2*beta + gamma
+        diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
+
+        # Применяем маску ROI
         masked_diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
 
-        # 5. Бинаризация
-        # Берем только пиксели внутри маски для расчета порога
+        # 5. Бинаризация (Умный порог)
         valid_pixels = masked_diff[roi_mask > 0]
 
         if len(valid_pixels) == 0:
-            return np.zeros_like(channel)
+            return np.zeros_like(channel), {}
 
-        # Вычисляем порог на основе статистики пикселей внутри чашки
-        # Колонии - это самые яркие пиксели
         mean_val = np.mean(valid_pixels)
         std_val = np.std(valid_pixels)
 
-        # Порог: среднее + k * стд. отклонение.
-        # Чем выше чувствительность, тем ниже порог (k меньше)
-        # Sens 1.0 -> k = 0.5, Sens 0.0 -> k = 3.0
+        # Порог зависит от чувствительности
         k = 3.0 - (sensitivity * 2.5)
         thresh_val = mean_val + k * std_val
 
-        # Ограничиваем порог разумными рамками (не ниже фона, не выше максимума)
+        # Ограничиваем порог
         thresh_val = max(mean_val + 5, min(thresh_val, 254))
 
         _, binary = cv2.threshold(masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY)
 
-        # 6. Очистка шума
-        # Morph Open удаляет мелкие точки (шум)
-        kernel_size = 3
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
-        )
-        clean_binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-
-        # Morph Close "заливает" дырки внутри колоний
+        # 6. Морфологическая очистка
+        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         clean_binary = cv2.morphologyEx(
-            clean_binary, cv2.MORPH_CLOSE, kernel, iterations=2
+            binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
+        )
+        clean_binary = cv2.morphologyEx(
+            clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
         )
 
         # 7. Фильтрация по размеру
         final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
 
-        return final_mask
+        # Собираем отладочные кадры для UI
+        debug_images = {
+            "preprocessed": masked_diff,  # Контрастное изображение
+            "binary": clean_binary,  # Бинарная маска (до фильтрации)
+        }
+
+        return final_mask, debug_images
 
     def _filter_components(self, mask: np.ndarray, min_size: int) -> np.ndarray:
         """Фильтрация связных компонентов по размеру."""
@@ -249,7 +248,6 @@ class ColonyDetector:
 
         filtered_mask = np.zeros_like(mask)
 
-        # stats: [left, top, width, height, area]
         for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
             if area >= min_size:
@@ -259,8 +257,6 @@ class ColonyDetector:
 
     def count_colonies(self, colony_mask: np.ndarray) -> int:
         """Подсчёт количества отдельных колоний."""
-        # Для точного подсчета слипшихся колоний (Watershed) нужен более сложный алгоритм,
-        # но для базовой задачи достаточно ConnectedComponents
         num_labels, _, _, _ = cv2.connectedComponentsWithStats(
             colony_mask, connectivity=8
         )

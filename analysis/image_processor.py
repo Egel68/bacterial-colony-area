@@ -17,7 +17,6 @@ class ImageProcessor:
         """
         Предобработка изображения для анализа.
         """
-        # Медианный фильтр хорошо убирает соль-перец шум, сохраняя края
         denoised = cv2.medianBlur(image, 3)
         return denoised
 
@@ -27,7 +26,6 @@ class ImageProcessor:
     ) -> np.ndarray:
         """
         Применение CLAHE (Contrast Limited Adaptive Histogram Equalization).
-        Отлично подходит для выделения деталей на темном фоне.
         """
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -48,23 +46,12 @@ class ImageProcessor:
     @staticmethod
     def extract_green_channel(image: np.ndarray) -> np.ndarray:
         """
-        Извлечение зеленого канала (часто наиболее контрастен для био-изображений).
+        Извлечение зеленого канала.
         """
         if len(image.shape) == 3:
+            # OpenCV использует BGR формат: 0-Blue, 1-Green, 2-Red
             return image[:, :, 1]
         return image
-
-    @staticmethod
-    def apply_tophat(image: np.ndarray, kernel_size: int = 15) -> np.ndarray:
-        """
-        Применение преобразования Top-Hat.
-        Выделяет светлые объекты на темном фоне, игнорируя градиенты освещения.
-        """
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
-        )
-        # TopHat = src - open(src)
-        return cv2.morphologyEx(image, cv2.MORPH_TOPHAT, kernel)
 
     @staticmethod
     def resize_image(
