@@ -84,9 +84,40 @@ class AnalysisWindow(QMainWindow):
         self._run_full_analysis()
 
     def _load_image(self):
-        self.original_image = cv2.imread(self.image_path)
-        if self.original_image is None:
-            raise ValueError(f"Не удалось загрузить изображение: {self.image_path}")
+        """
+        Кроссплатформенная загрузка изображения.
+        Работает с путями UTF-8 в Windows, Linux и macOS.
+        """
+        import os
+        from pathlib import Path
+
+        # Нормализуем путь (убираем .., ., разные разделители)
+        self.image_path = os.path.normpath(self.image_path)
+
+        # Проверяем существование файла
+        if not os.path.exists(self.image_path):
+            raise ValueError(f"Файл не найден: {self.image_path}")
+
+        # Универсальный метод: Python bytes + OpenCV decode
+        # Работает везде, включая Windows с кириллицей
+        try:
+            with open(self.image_path, 'rb') as f:
+                file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
+
+            self.original_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+            if self.original_image is None:
+                raise ValueError("cv2.imdecode вернул None")
+
+        except Exception as e:
+            # Fallback для старых систем или специфических случаев
+            self.original_image = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
+            if self.original_image is None:
+                raise ValueError(
+                    f"Не удалось загрузить изображение: {self.image_path}\n"
+                    f"Ошибка: {str(e)}"
+                )
+
         self.display_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
 
     def _init_ui(self):
