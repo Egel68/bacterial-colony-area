@@ -28,14 +28,10 @@ class ColonyDetector:
     def detect_petri_dish(
         self, image: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
-        """
-        Обнаружение чашки Петри.
-        Использует тот факт, что края чашки на этих фото - самые яркие объекты (блики).
-        """
+        """Обнаружение чашки Петри."""
         gray = self.processor.to_grayscale(image)
         h, w = gray.shape
 
-        # 1. Грубая бинаризация для поиска ярких бликов по кругу
         blurred = cv2.GaussianBlur(gray, (9, 9), 2)
         _, bright_mask = cv2.threshold(blurred, 200, 255, cv2.THRESH_BINARY)
 
@@ -140,12 +136,11 @@ class ColonyDetector:
         edge_margin_percent: float = 10,
         contrast_level: float = 1.0,
         blur_size: int = 5,
-        # НОВЫЕ ПАРАМЕТРЫ
-        use_solid_fill: bool = False,  # Включить логику заполнения
-        fill_strength: int = 15,  # Размер ядра для закрытия дыр
+        use_solid_fill: bool = False,
+        fill_strength: int = 15,
     ) -> Tuple[np.ndarray, Dict]:
 
-        # 1. ROI
+        # 1. Формируем маску рабочей зоны (ROI)
         if petri_info:
             roi_mask = self.create_inner_mask(
                 petri_mask, petri_info, edge_margin_percent
@@ -153,67 +148,102 @@ class ColonyDetector:
         else:
             roi_mask = petri_mask
 
-        # 2. Обработка
+        # 2. Выделяем нужный канал и улучшаем контраст
         channel = self.processor.extract_green_channel(image)
-
         clip_limit = 2.0 * contrast_level
         enhanced = self.processor.apply_clahe(
             channel, clip_limit=clip_limit, grid_size=8
         )
 
-        k_size = blur_size if blur_size % 2 == 1 else blur_size + 1
-        k_size = max(3, k_size)
+        k_size = max(3, blur_size if blur_size % 2 == 1 else blur_size + 1)
         denoised = cv2.medianBlur(enhanced, k_size)
 
-        bg = cv2.GaussianBlur(denoised, (51, 51), 0)
-        diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
-        masked_diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
+        # 3. МОРФОЛОГИЧЕСКИЙ TOP-HAT (Идеально удаляет неравномерный фон и оставляет только колонии)
+        tophat_kernel_size = 51  # Ядро больше, чем самая крупная одиночная колония
+        bg_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (tophat_kernel_size, tophat_kernel_size)
+        )
+        tophat = cv2.morphologyEx(denoised, cv2.MORPH_TOPHAT, bg_kernel)
 
-        # 3. Бинаризация
-        valid_pixels = masked_diff[roi_mask > 0]
+        masked_tophat = cv2.bitwise_and(tophat, tophat, mask=roi_mask)
+
+        # 4. Адаптивная бинаризация
+        valid_pixels = masked_tophat[roi_mask > 0]
         if len(valid_pixels) == 0:
             return np.zeros_like(channel), {}
 
         mean_val = np.mean(valid_pixels)
         std_val = np.std(valid_pixels)
 
-        k = 3.0 - (sensitivity * 2.5)
+        # Настраиваем порог отталкиваясь от чувствительности (плавный контроль)
+        # При sensitivity 1.0 -> k ~ 0.5 (очень чувствительно)
+        # При sensitivity 0.0 -> k ~ 4.0 (только самые яркие)
+        k = 4.0 - (sensitivity * 3.5)
         thresh_val = mean_val + k * std_val
-        thresh_val = max(mean_val + 5, min(thresh_val, 254))
+        thresh_val = np.clip(thresh_val, 5, 250)
 
-        _, binary = cv2.threshold(masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY)
-
-        # 4. Базовая очистка (удаление шума)
-        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        clean_binary = cv2.morphologyEx(
-            binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
+        _, binary = cv2.threshold(
+            masked_tophat, int(thresh_val), 255, cv2.THRESH_BINARY
         )
 
-        # --- ЛОГИКА ЗАПОЛНЕНИЯ СПЛОШНЫХ ЗОН ---
+        # Очистка базового шума
+        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        opening = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_morph, iterations=1)
+
+        # 5. ФОРМИРОВАНИЕ ГРАНИЦ И РАЗДЕЛЕНИЕ СЛИПШИХСЯ КОЛОНИЙ
         if use_solid_fill:
-            # Шаг 1: Морфологическое закрытие (Closing)
-            # Это соединяет близко расположенные пятна "мазков"
+            # Сплошная заливка мазков (оставляем вашу логику)
             fill_k_size = max(3, fill_strength)
             fill_kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
             )
-            clean_binary = cv2.morphologyEx(clean_binary, cv2.MORPH_CLOSE, fill_kernel)
-
-            # Шаг 2: Заливка контуров (Hole Filling)
-            # Находим контуры и заливаем их внутренности
+            clean_binary = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, fill_kernel)
             contours = self._find_contours(clean_binary)
-            # Рисуем все контуры белым цветом и заливаем (-1)
             cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
         else:
-            # Стандартная обработка для одиночных колоний
-            clean_binary = cv2.morphologyEx(
-                clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
-            )
+            # ALGORITHM WATERSHED (Водораздел) для разделения одиночных колоний
 
-        # 5. Фильтрация по размеру
+            # Точный фон (где точно нет колоний)
+            sure_bg = cv2.dilate(opening, kernel_morph, iterations=2)
+
+            # Вычисление дистанции от краев к центру колоний (Distance Transform)
+            dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
+
+            # Поиск точных центров колоний. Множитель зависит от чувствительности.
+            # Если колонии сильно слиплись, порог должен быть выше
+            dt_multiplier = 0.6 - (sensitivity * 0.4)
+            _, sure_fg = cv2.threshold(
+                dist_transform, dt_multiplier * dist_transform.max(), 255, 0
+            )
+            sure_fg = np.uint8(sure_fg)
+
+            # Неизвестная зона (где колонии соприкасаются)
+            unknown = cv2.subtract(sure_bg, sure_fg)
+
+            # Маркировка центров для алгоритма
+            _, markers = cv2.connectedComponents(sure_fg)
+            markers = markers + 1
+            markers[unknown == 255] = 0
+
+            # Применяем Watershed на исходном отфильтрованном изображении (переведенном в BGR)
+            img_for_watershed = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+            markers = cv2.watershed(img_for_watershed, markers)
+
+            # Восстанавливаем маску колоний (все что больше 1 - это колонии, 1 - это фон, -1 - границы)
+            clean_binary = np.zeros_like(opening)
+            clean_binary[markers > 1] = 255
+
+        # Обрезаем маску строго по рабочей зоне (ROI), чтобы края чашки не давали артефактов
+        clean_binary = cv2.bitwise_and(clean_binary, clean_binary, mask=roi_mask)
+
+        # 6. Фильтрация по минимальному размеру
         final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
 
-        debug_images = {"preprocessed": masked_diff, "binary": clean_binary}
+        # Для UI возвращаем то, что помогает диагностировать работу пайплайна
+        debug_images = {
+            "preprocessed": masked_tophat,  # Показываем, как отработал алгоритм выравнивания освещения
+            "binary": final_mask,
+        }
 
         return final_mask, debug_images
 
@@ -222,6 +252,7 @@ class ColonyDetector:
             mask, connectivity=8
         )
         filtered_mask = np.zeros_like(mask)
+        # i=0 - это фон, пропускаем его
         for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
             if area >= min_size:
