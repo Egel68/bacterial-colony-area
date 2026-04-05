@@ -84,33 +84,20 @@ class AnalysisWindow(QMainWindow):
         self._run_full_analysis()
 
     def _load_image(self):
-        """
-        Кроссплатформенная загрузка изображения.
-        Работает с путями UTF-8 в Windows, Linux и macOS.
-        """
         import os
         from pathlib import Path
 
-        # Нормализуем путь (убираем .., ., разные разделители)
         self.image_path = os.path.normpath(self.image_path)
-
-        # Проверяем существование файла
         if not os.path.exists(self.image_path):
             raise ValueError(f"Файл не найден: {self.image_path}")
 
-        # Универсальный метод: Python bytes + OpenCV decode
-        # Работает везде, включая Windows с кириллицей
         try:
-            with open(self.image_path, 'rb') as f:
+            with open(self.image_path, "rb") as f:
                 file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
-
             self.original_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
             if self.original_image is None:
                 raise ValueError("cv2.imdecode вернул None")
-
         except Exception as e:
-            # Fallback для старых систем или специфических случаев
             self.original_image = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
             if self.original_image is None:
                 raise ValueError(
@@ -122,7 +109,7 @@ class AnalysisWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("Анализ бактериальных колоний")
-        self.resize(1400, 950)  # Немного увеличим высоту
+        self.resize(1400, 950)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -237,6 +224,20 @@ class AnalysisWindow(QMainWindow):
         group = QGroupBox("⚙️ Параметры алгоритма")
         l = QVBoxLayout(group)
 
+        # Выбор алгоритма
+        l.addWidget(QLabel("Версия алгоритма:"))
+        self.algo_combo = QComboBox()
+        self.algo_combo.addItems(
+            [
+                "Оригинальный (Базовый)",
+                "Улучшенный (Otsu + Watershed Limits)",
+                "Продвинутый (+ Геометрическая фильтрация)",
+            ]
+        )
+        self.algo_combo.setCurrentIndex(2)  # Ставим самый лучший по умолчанию
+        self.algo_combo.currentIndexChanged.connect(self._run_colony_analysis_only)
+        l.addWidget(self.algo_combo)
+
         # Чувствительность
         l.addWidget(QLabel("Чувствительность:"))
         h_sens = QHBoxLayout()
@@ -279,7 +280,7 @@ class AnalysisWindow(QMainWindow):
         self.spin_min_size.setValue(50)
         l.addWidget(self.spin_min_size)
 
-        # --- Секция сплошных зон (НОВАЯ) ---
+        # --- Секция сплошных зон ---
         l.addSpacing(10)
         fill_frame = QFrame()
         fill_frame.setStyleSheet(
@@ -305,7 +306,6 @@ class AnalysisWindow(QMainWindow):
         fill_layout.addLayout(fill_h)
 
         l.addWidget(fill_frame)
-        # ------------------------------------
 
         btn_apply = QPushButton("🔄 Пересчитать")
         btn_apply.setStyleSheet(
@@ -335,8 +335,6 @@ class AnalysisWindow(QMainWindow):
         h.addWidget(btn_save)
         h.addWidget(btn_close)
         layout.addLayout(h)
-
-    # --- ЛОГИКА ---
 
     def _run_full_analysis(self):
         self.status_label.setText("Поиск чашки Петри...")
@@ -393,15 +391,16 @@ class AnalysisWindow(QMainWindow):
         self.status_label.setText("Анализ колоний...")
 
         # Считываем параметры UI
+        algorithm_mode = self.algo_combo.currentIndex()
         sensitivity = self.slider_sens.value() / 100.0
         contrast = self.slider_contrast.value() / 10.0
         min_size = self.spin_min_size.value()
-        margin = self.spin_margin.value()  # <--- Вот этот параметр
+        margin = self.spin_margin.value()
 
         use_solid_fill = self.chk_solid_fill.isChecked()
         fill_strength = self.spin_fill_strength.value()
 
-        # Детекция...
+        # Детекция с учетом режима
         self.colony_mask, self.debug_images = self.detector.detect_colonies(
             self.original_image,
             self.petri_mask,
@@ -413,6 +412,7 @@ class AnalysisWindow(QMainWindow):
             blur_size=5,
             use_solid_fill=use_solid_fill,
             fill_strength=fill_strength,
+            algorithm_mode=algorithm_mode,  # <--- НОВЫЙ АРГУМЕНТ
         )
 
         # Расчет площади с передачей margin_percent
@@ -420,7 +420,7 @@ class AnalysisWindow(QMainWindow):
             self.petri_mask,
             self.colony_mask,
             self.petri_info,
-            margin_percent=margin,  # <--- ПЕРЕДАЕМ СЮДА
+            margin_percent=margin,
         )
 
         # Вывод результатов...
