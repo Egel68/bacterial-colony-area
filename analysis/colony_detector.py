@@ -138,6 +138,7 @@ class ColonyDetector:
         blur_size: int = 5,
         use_solid_fill: bool = False,
         fill_strength: int = 15,
+        algorithm_mode: int = 2,  # 0-Оригинальный, 1-Улучшенный, 2-Продвинутый (с фильтрацией)
     ) -> Tuple[np.ndarray, Dict]:
 
         # 1. Формируем маску рабочей зоны (ROI)
@@ -158,8 +159,8 @@ class ColonyDetector:
         k_size = max(3, blur_size if blur_size % 2 == 1 else blur_size + 1)
         denoised = cv2.medianBlur(enhanced, k_size)
 
-        # 3. МОРФОЛОГИЧЕСКИЙ TOP-HAT (Идеально удаляет неравномерный фон и оставляет только колонии)
-        tophat_kernel_size = 51  # Ядро больше, чем самая крупная одиночная колония
+        # 3. МОРФОЛОГИЧЕСКИЙ TOP-HAT (удаляет неравномерный фон)
+        tophat_kernel_size = 51
         bg_kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (tophat_kernel_size, tophat_kernel_size)
         )
@@ -175,11 +176,18 @@ class ColonyDetector:
         mean_val = np.mean(valid_pixels)
         std_val = np.std(valid_pixels)
 
-        # Настраиваем порог отталкиваясь от чувствительности (плавный контроль)
-        # При sensitivity 1.0 -> k ~ 0.5 (очень чувствительно)
-        # При sensitivity 0.0 -> k ~ 4.0 (только самые яркие)
-        k = 4.0 - (sensitivity * 3.5)
-        thresh_val = mean_val + k * std_val
+        if algorithm_mode == 0:
+            # Оригинальный подход: Слишком резкая зависимость
+            k = 4.0 - (sensitivity * 3.5)
+            thresh_val = mean_val + k * std_val
+        else:
+            # Улучшенный подход (ColTapp, OpenCFU): Комбинация Otsu и статистики
+            otsu_thresh = cv2.threshold(masked_tophat, 0, 255, cv2.THRESH_OTSU)[0]
+            median_val = np.median(valid_pixels)
+            stat_thresh = median_val + (3.0 - sensitivity * 2.5) * std_val
+            # Взвешиваем пороги для максимальной стабильности
+            thresh_val = 0.7 * otsu_thresh + 0.3 * stat_thresh
+
         thresh_val = np.clip(thresh_val, 5, 250)
 
         _, binary = cv2.threshold(
@@ -192,7 +200,6 @@ class ColonyDetector:
 
         # 5. ФОРМИРОВАНИЕ ГРАНИЦ И РАЗДЕЛЕНИЕ СЛИПШИХСЯ КОЛОНИЙ
         if use_solid_fill:
-            # Сплошная заливка мазков (оставляем вашу логику)
             fill_k_size = max(3, fill_strength)
             fill_kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
@@ -201,47 +208,48 @@ class ColonyDetector:
             contours = self._find_contours(clean_binary)
             cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
         else:
-            # ALGORITHM WATERSHED (Водораздел) для разделения одиночных колоний
-
-            # Точный фон (где точно нет колоний)
+            # WATERSHED (Водораздел)
             sure_bg = cv2.dilate(opening, kernel_morph, iterations=2)
-
-            # Вычисление дистанции от краев к центру колоний (Distance Transform)
             dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
 
-            # Поиск точных центров колоний. Множитель зависит от чувствительности.
-            # Если колонии сильно слиплись, порог должен быть выше
-            dt_multiplier = 0.6 - (sensitivity * 0.4)
+            if algorithm_mode == 0:
+                # Оригинальный метод
+                dt_multiplier = 0.6 - (sensitivity * 0.4)
+            else:
+                # Метод Vincent & Soille (1991): Жесткие границы диапазона
+                dt_multiplier = 0.4 - (sensitivity * 0.2)
+                dt_multiplier = max(0.15, min(0.45, dt_multiplier))
+
             _, sure_fg = cv2.threshold(
                 dist_transform, dt_multiplier * dist_transform.max(), 255, 0
             )
             sure_fg = np.uint8(sure_fg)
 
-            # Неизвестная зона (где колонии соприкасаются)
             unknown = cv2.subtract(sure_bg, sure_fg)
-
-            # Маркировка центров для алгоритма
             _, markers = cv2.connectedComponents(sure_fg)
             markers = markers + 1
             markers[unknown == 255] = 0
 
-            # Применяем Watershed на исходном отфильтрованном изображении (переведенном в BGR)
             img_for_watershed = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
             markers = cv2.watershed(img_for_watershed, markers)
 
-            # Восстанавливаем маску колоний (все что больше 1 - это колонии, 1 - это фон, -1 - границы)
             clean_binary = np.zeros_like(opening)
             clean_binary[markers > 1] = 255
 
-        # Обрезаем маску строго по рабочей зоне (ROI), чтобы края чашки не давали артефактов
         clean_binary = cv2.bitwise_and(clean_binary, clean_binary, mask=roi_mask)
 
-        # 6. Фильтрация по минимальному размеру
-        final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
+        # 6. Фильтрация
+        if algorithm_mode < 2:
+            # Обычная фильтрация только по минимальному размеру
+            final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
+        else:
+            # Продвинутая фильтрация (с учетом геометрической формы - extent & circularity)
+            final_mask = self._filter_components_advanced(
+                clean_binary, min_size=min_colony_size
+            )
 
-        # Для UI возвращаем то, что помогает диагностировать работу пайплайна
         debug_images = {
-            "preprocessed": masked_tophat,  # Показываем, как отработал алгоритм выравнивания освещения
+            "preprocessed": masked_tophat,
             "binary": final_mask,
         }
 
@@ -252,11 +260,41 @@ class ColonyDetector:
             mask, connectivity=8
         )
         filtered_mask = np.zeros_like(mask)
-        # i=0 - это фон, пропускаем его
         for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
             if area >= min_size:
                 filtered_mask[labels == i] = 255
+        return filtered_mask
+
+    def _filter_components_advanced(
+        self, mask: np.ndarray, min_size: int
+    ) -> np.ndarray:
+        """
+        Геометрическая фильтрация (Brugger et al. / OpenCFU).
+        Удаляет вытянутые царапины, артефакты краев чашки и нетипичный мусор.
+        """
+        contours = self._find_contours(mask)
+        filtered_mask = np.zeros_like(mask)
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < min_size:
+                continue
+
+            # 1. Extent (площадь / площадь ограничивающего прямоугольника)
+            x, y, w, h = cv2.boundingRect(cnt)
+            bounding_box_area = w * h
+            extent = area / float(bounding_box_area) if bounding_box_area > 0 else 0
+
+            # 2. Circularity (Круглость)
+            perimeter = cv2.arcLength(cnt, True)
+            circularity = 4 * np.pi * area / (perimeter**2) if perimeter > 0 else 0
+
+            # Колонии могут быть слипшимися (что снижает круглость),
+            # но они почти никогда не имеют extent < 0.25 и circularity < 0.2
+            if extent >= 0.3 and circularity >= 0.25:
+                cv2.drawContours(filtered_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+
         return filtered_mask
 
     def count_colonies(self, colony_mask: np.ndarray) -> int:
