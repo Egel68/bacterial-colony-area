@@ -24,37 +24,60 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y g++ patchelf
+
+      - name: Install system dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install -y mingw
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\x86_64-posix-seh\bin" | Out-File -Append $env:GITHUB_PATH
+        shell: pwsh
+
       - name: Install project dependencies
         run: uv sync
 
-      - name: Install PyInstaller
-        run: uv pip install pyinstaller
+      - name: Install Nuitka
+        run: uv pip install nuitka zstandard
 
       - name: Build executable (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          uv run pyinstaller \
+          uv run nuitka \
+            --standalone \
             --onefile \
-            --windowed \
-            --name=BacteriaAnalyzer \
-            --icon=icon.ico \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=albumentations \
-            --hidden-import=tqdm \
+            --show-progress \
+            --enable-plugin=pyqt6 \
+            --enable-plugin=numpy \
+            --include-package=ui \
+            --include-package=analysis \
+            --include-package=utils \
+            --include-package=labeling \
+            --include-module=cv2 \
+            --include-module=albumentations \
+            --include-module=tqdm \
+            --output-filename=BacteriaAnalyzer \
             main.py
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          uv run pyinstaller `
+          uv run nuitka `
+            --standalone `
             --onefile `
-            --windowed `
-            --name=BacteriaAnalyzer `
-            --icon=icon.ico `
-            --hidden-import=PyQt6.sip `
-            --hidden-import=albumentations `
-            --hidden-import=tqdm `
+            --show-progress `
+            --enable-plugin=pyqt6 `
+            --enable-plugin=numpy `
+            --include-package=ui `
+            --include-package=analysis `
+            --include-package=utils `
+            --include-package=labeling `
+            --include-module=cv2 `
+            --include-module=albumentations `
+            --include-module=tqdm `
+            --output-filename=BacteriaAnalyzer.exe `
             main.py
 
       - name: Upload artifact (Linux)
@@ -62,11 +85,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BacteriaAnalyzer-Linux
-          path: dist/BacteriaAnalyzer
+          path: BacteriaAnalyzer
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: BacteriaAnalyzer-Windows
-          path: dist/BacteriaAnalyzer.exe
+          path: BacteriaAnalyzer.exe

@@ -8,7 +8,7 @@ Python 3.13+ / PyQt6 / OpenCV / NumPy desktop app.
 
 | Окружение | Команда | Размер | Назначение |
 |---|---|---|---|
-| `.venv` (runtime) | `uv sync` | ~600 МБ | Запуск приложения, PyInstaller |
+| `.venv` (runtime) | `uv sync` | ~600 МБ | Запуск приложения, Nuitka |
 | `.venv-dev` (dev) | `UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev` | ~5 ГБ | Разработка, обучение, аугментация |
 
 ## Run
@@ -72,9 +72,17 @@ source .venv-dev/bin/activate
 - **Min colony size** (px, filtered via connected components)
 - **Solid fill** toggle + fill strength (closing kernel radius, for confluent lawns)
 
+## Build (Nuitka)
+
+```bash
+# Локальная сборка одного бинарника
+bash scripts/build_nuitka.sh
+# Результат: ./BacteriaAnalyzer (~120 МБ)
+```
+
 ## CI
 
-`.github/workflows/build.yaml` — PyInstaller via `uv` on push to `develop`/`main`. Python 3.13, matrix: ubuntu + windows. Собирается runtime-окружение (без torch/CUDA), ~200–350 МБ. No tests, linting, typechecking, or formatting gates.
+`.github/workflows/build.yaml` — Nuitka via `uv` on push to `develop`/`main`. Python 3.13, matrix: ubuntu + windows. Собирается runtime-окружение (без torch/CUDA), ~120–150 МБ. No tests, linting, typechecking, or formatting gates.
 
 ## What is NOT configured
 
