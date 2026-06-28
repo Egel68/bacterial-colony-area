@@ -20,6 +20,7 @@ uv run python scripts/nuitka_build.py \
   --standalone \
   --onefile \
   --show-progress \
+  --icon=icon.ico \
   --output-filename=BacteriaAnalyzer \
   main.py
 
