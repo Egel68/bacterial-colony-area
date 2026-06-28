@@ -10,6 +10,14 @@ from fastapi.responses import HTMLResponse
 HERE = Path(__file__).parent
 app = FastAPI()
 
+
+@app.on_event("startup")
+async def _capture_loop():
+    global _loop
+    _loop = asyncio.get_running_loop()
+
+_loop: asyncio.AbstractEventLoop | None = None
+
 _metrics_store: dict[str, list] = {
     "epochs": [],
     "train": [],
@@ -31,9 +39,7 @@ def update(epoch: int, total: int, train_metrics: dict, val_metrics: dict, elaps
     })
     for ws in set(_clients):
         try:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(ws.send_text(data))
-            loop.close()
+            asyncio.run_coroutine_threadsafe(ws.send_text(data), _loop)
         except Exception:
             _clients.discard(ws)
 

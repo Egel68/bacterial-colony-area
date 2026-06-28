@@ -1,5 +1,7 @@
 import argparse
 import json
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -23,9 +25,22 @@ def _train(args):
 
     if args.dashboard:
         from .dashboard.server import run_server, update
+
         server = threading.Thread(target=run_server, args=(cfg.dashboard_port,), daemon=True)
         server.start()
         print(f"Dashboard: http://127.0.0.1:{cfg.dashboard_port}")
+
+        try:
+            subprocess.Popen(
+                [sys.executable, "-m", "tensorboard",
+                 "--logdir", str(cfg.run_dir),
+                 "--port", "6006"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            print(f"TensorBoard: http://127.0.0.1:6006")
+        except Exception:
+            print("TensorBoard: не удалось запустить (возможно порт занят)")
+
         progress_callback = update
     else:
         from rich.progress import (
