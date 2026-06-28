@@ -67,7 +67,7 @@ def val_epoch(
 def run_training(
     cfg: TrainingConfig,
     progress_callback=None,
-) -> tuple[dict, list, list]:
+) -> tuple[dict, list, list, Path]:
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
@@ -148,4 +148,4 @@ def run_training(
     with open(run_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
-    return summary, train_hist, val_hist
+    return summary, train_hist, val_hist, run_dir

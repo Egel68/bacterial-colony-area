@@ -55,19 +55,13 @@ def _train(args):
         progress.start()
 
     try:
-        summary, train_hist, val_hist = run_training(cfg, progress_callback)
+        summary, train_hist, val_hist, run_dir = run_training(cfg, progress_callback)
     finally:
         if not args.dashboard:
             progress.stop()
 
-    if args.dashboard:
-        print("Training complete. Generating report...")
-
     summary["train_log"] = train_hist
     summary["val_log"] = val_hist
-
-    run_dir = cfg.run_dir / f"{cfg.model_name}_{summary.get('best_epoch', 'done')}"
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     with open(run_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2, default=str)

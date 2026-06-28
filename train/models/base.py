@@ -54,15 +54,18 @@ class BaseSegmenter(ABC, nn.Module):
     def to_onnx(self, path: str, input_shape: tuple[int, ...] = (1, 3, 512, 512)):
         self.eval()
         dummy = torch.randn(input_shape, device=next(self.parameters()).device)
-        torch.onnx.export(
-            self,
-            dummy,
-            path,
-            input_names=["input"],
-            output_names=["output"],
-            dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
-            opset_version=17,
-        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*dynamic_axes.*")
+            torch.onnx.export(
+                self,
+                dummy,
+                path,
+                input_names=["input"],
+                output_names=["output"],
+                dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+                opset_version=18,
+            )
 
     @staticmethod
     def load_onnx(path: str):

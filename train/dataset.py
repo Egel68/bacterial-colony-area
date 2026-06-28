@@ -37,7 +37,9 @@ class ColonyDataset(Dataset):
         mask = mask[None, :, :]
 
         image = image.astype(np.float32) / 255.0
-        image = (image - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        image = (image - mean) / std
         image = torch.from_numpy(image).permute(2, 0, 1)
         mask = torch.from_numpy(mask)
         return image, mask
