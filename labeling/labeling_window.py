@@ -142,17 +142,17 @@ class PaintLabel(QLabel):
         )
         self.setPixmap(scaled)
         self._scale = orig_w / new_w
-        self.updateGeometry()
 
-    def sizeHint(self):
-        if self.pixmap() and not self.pixmap().isNull():
-            return self.pixmap().size()
-        return super().sizeHint()
+        if self._zoom_factor != 1.0:
+            self.setMinimumSize(new_w, new_h)
+        else:
+            self.setMinimumSize(0, 0)
+
+        self.updateGeometry()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._zoom_factor == 1.0:
-            self._update_scaled()
+        self._update_scaled()
 
     def wheelEvent(self, event):
         if self._original_pixmap is None:
@@ -331,7 +331,7 @@ class LabelingWindow(QMainWindow):
         vl.addWidget(self.status_label)
 
         scroll = QScrollArea()
-        scroll.setWidgetResizable(False)
+        scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
             "QScrollBar:vertical { background: #181825; width: 10px; }"
