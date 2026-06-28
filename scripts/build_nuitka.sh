@@ -25,7 +25,6 @@ uv run nuitka \
   --onefile \
   --show-progress \
   --enable-plugin=pyqt6 \
-  --enable-plugin=numpy \
   --include-package=ui \
   --include-package=analysis \
   --include-package=utils \

@@ -32,11 +32,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y g++ patchelf
 
-      - name: Install MinGW (Windows)
+      - name: Setup MSYS2 (MinGW)
         if: matrix.os == 'windows-latest'
-        uses: egor-tensin/setup-mingw@v2
+        uses: msys2/setup-msys2@v2
         with:
-          platform: x64
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-libs
 
       - name: Install project dependencies
         run: uv sync
@@ -51,7 +53,6 @@ jobs:
             --standalone \
             --onefile \
             --enable-plugin=pyqt6 \
-            --enable-plugin=numpy \
             --include-package=ui \
             --include-package=analysis \
             --include-package=utils \
@@ -71,7 +72,6 @@ jobs:
             --onefile `
             --mingw64 `
             --enable-plugin=pyqt6 `
-            --enable-plugin=numpy `
             --include-package=ui `
             --include-package=analysis `
             --include-package=utils `
@@ -80,6 +80,7 @@ jobs:
             --include-module=albumentations `
             --include-module=tqdm `
             --output-filename=BacteriaAnalyzer.exe `
+            --jobs=2 `
             main.py
 
       - name: Upload artifact (Linux)
