@@ -54,6 +54,7 @@ jobs:
             --standalone --onefile `
             --msvc=latest `
             --assume-yes-for-downloads `
+            --windows-console-mode=disable `
             --windows-icon-from-ico=icon.ico `
             --jobs=2 `
             --output-filename=BacteriaAnalyzer.exe `
