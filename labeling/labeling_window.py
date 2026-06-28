@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -357,15 +356,22 @@ class LabelingWindow(QMainWindow):
 
         hl.addWidget(QLabel("Размер кисти:"))
 
-        self.brush_slider = QSlider(Qt.Orientation.Horizontal)
-        self.brush_slider.setRange(2, 100)
-        self.brush_slider.setValue(20)
-        self.brush_slider.valueChanged.connect(self._on_brush_changed)
-        hl.addWidget(self.brush_slider, stretch=1)
+        btn_brush_minus = QPushButton("−")
+        btn_brush_minus.setFixedWidth(30)
+        btn_brush_minus.setStyleSheet("background-color: #45475a; padding: 4px; font-size: 14px;")
+        btn_brush_minus.clicked.connect(self._on_brush_decrease)
+        hl.addWidget(btn_brush_minus)
 
         self.brush_size_label = QLabel("20 px")
-        self.brush_size_label.setFixedWidth(50)
+        self.brush_size_label.setFixedWidth(40)
+        self.brush_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl.addWidget(self.brush_size_label)
+
+        btn_brush_plus = QPushButton("+")
+        btn_brush_plus.setFixedWidth(30)
+        btn_brush_plus.setStyleSheet("background-color: #45475a; padding: 4px; font-size: 14px;")
+        btn_brush_plus.clicked.connect(self._on_brush_increase)
+        hl.addWidget(btn_brush_plus)
 
         hl.addStretch()
 
@@ -451,9 +457,15 @@ class LabelingWindow(QMainWindow):
         self.paint_label.zoom_reset()
         self._update_zoom_label()
 
-    def _on_brush_changed(self, value: int):
-        self.brush_size_label.setText(f"{value} px")
-        self.paint_label.brush_size = value
+    def _on_brush_decrease(self):
+        new = max(2, self.paint_label.brush_size - 2)
+        self.paint_label.brush_size = new
+        self.brush_size_label.setText(f"{new} px")
+
+    def _on_brush_increase(self):
+        new = min(100, self.paint_label.brush_size + 2)
+        self.paint_label.brush_size = new
+        self.brush_size_label.setText(f"{new} px")
 
     def _on_view_changed(self, index: int):
         self.paint_label.view_mode = index
