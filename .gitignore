@@ -11,7 +11,7 @@ build/
 
 # Generated training data
 train/data/
-train/runs/
+train/runs/**/*.pt
 
 # Test reports
 test_report.html

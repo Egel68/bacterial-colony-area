@@ -120,8 +120,10 @@ def run_training(
             best_epoch = epoch
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
             torch.save(best_state, str(ckpt_dir / "best.pt"))
+            model.to_onnx(str(ckpt_dir / "best.onnx"))
 
         torch.save(model.state_dict(), str(ckpt_dir / "last.pt"))
+        model.to_onnx(str(ckpt_dir / "last.onnx"))
 
         if progress_callback:
             progress_callback(epoch, cfg.epochs, train_metrics, val_metrics, elapsed)
@@ -129,10 +131,6 @@ def run_training(
         if epoch - best_epoch > cfg.patience:
             print(f"Early stopping at epoch {epoch}")
             break
-
-    if best_state is not None:
-        model.load_state_dict(best_state)
-        model.to_onnx(str(ckpt_dir / "model.onnx"))
 
     writer.close()
 
