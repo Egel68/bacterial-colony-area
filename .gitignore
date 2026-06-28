@@ -12,6 +12,9 @@ build/
 # Generated training data
 train/data/
 train/runs/**/*.pt
+train/runs/**/*.onnx.data
+train/runs/**/tensorboard/
+train/runs/**/report.html
 
 # Test reports
 test_report.html
