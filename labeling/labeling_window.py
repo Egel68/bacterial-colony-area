@@ -566,8 +566,10 @@ class LabelingWindow(QMainWindow):
         if not files:
             return
         copied = 0
+        dst_dir = self.session_dir / "source"
+        dst_dir.mkdir(parents=True, exist_ok=True)
         for src in map(Path, files):
-            dst = self.session_dir / src.name
+            dst = dst_dir / src.name
             shutil.copy2(str(src), str(dst))
             copied += 1
         self.status_label.setText(
