@@ -531,10 +531,30 @@ class LabelingWindow(QMainWindow):
             self.paint_label.clear_mask()
 
     def _get_current_dir(self):
-        return self.source_dir if self.mode == "source" else self.cropped_dir
+        if self.mode == "source":
+            sub = self.session_dir / "source"
+            if sub.is_dir() and any(
+                f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
+            ):
+                return sub
+            return self.session_dir
+        sub = self.session_dir / "cropped"
+        if sub.is_dir() and any(
+            f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
+        ):
+            return sub
+        return self.session_dir
 
     def _get_mask_dir(self):
-        return self.masks_dir if self.mode == "source" else self.cropped_masks_dir
+        if self.mode == "source":
+            sub = self.session_dir / "masks"
+            if sub.is_dir():
+                return sub
+            return self.masks_dir
+        sub = self.session_dir / "cropped_masks"
+        if sub.is_dir():
+            return sub
+        return self.cropped_masks_dir
 
     def _on_add_images(self):
         files, _ = QFileDialog.getOpenFileNames(
