@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .analysis_window import AnalysisWindow
+from labeling import LabelingWindow
 
 
 class MainWindow(QMainWindow):
@@ -157,6 +158,27 @@ class MainWindow(QMainWindow):
 
         button_layout.addStretch()
         layout.addLayout(button_layout)
+
+        # Кнопка разметки тестовых изображений
+        label_layout = QHBoxLayout()
+        label_layout.addStretch()
+        self.label_button = QPushButton("✏️ Разметка тестовых изображений")
+        self.label_button.setObjectName("secondary")
+        self.label_button.setMinimumSize(260, 40)
+        self.label_button.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                border-radius: 10px;
+            }
+        """)
+        self.label_button.clicked.connect(self._open_labeling)
+        label_layout.addWidget(self.label_button)
+        label_layout.addStretch()
+        layout.addLayout(label_layout)
+
+    def _open_labeling(self):
+        self.labeling_window = LabelingWindow(self)
+        self.labeling_window.show()
 
     def _open_file_dialog(self):
         """Открытие диалога выбора файла."""
