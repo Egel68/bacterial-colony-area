@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -205,13 +206,10 @@ class LabelingWindow(QMainWindow):
     def __init__(self, session_dir: Path, parent=None):
         super().__init__(parent)
         self.session_dir = session_dir.resolve()
-        self.source_dir = self.session_dir / "source"
+        self.source_dir = self.session_dir
         self.masks_dir = self.session_dir / "masks"
         self.cropped_dir = self.session_dir / "cropped"
         self.cropped_masks_dir = self.session_dir / "cropped_masks"
-
-        for d in [self.source_dir, self.masks_dir, self.cropped_dir, self.cropped_masks_dir]:
-            d.mkdir(parents=True, exist_ok=True)
 
         self.current_stem = None
         self.current_path = None
@@ -549,7 +547,7 @@ class LabelingWindow(QMainWindow):
             return
         copied = 0
         for src in map(Path, files):
-            dst = self.source_dir / src.name
+            dst = self.session_dir / src.name
             shutil.copy2(str(src), str(dst))
             copied += 1
         self.status_label.setText(
@@ -709,6 +707,7 @@ class LabelingWindow(QMainWindow):
         cropped[circle_mask == 0] = [0, 0, 0]
 
         out_name = f"{self.current_stem}_cropped.png"
+        self.cropped_dir.mkdir(parents=True, exist_ok=True)
         out_path = self.cropped_dir / out_name
         cv2.imwrite(str(out_path), cropped)
 
@@ -768,6 +767,7 @@ class LabelingWindow(QMainWindow):
             )
             return
         mask_dir = self._get_mask_dir()
+        mask_dir.mkdir(parents=True, exist_ok=True)
         mask_path = mask_dir / f"{self.current_stem}_mask.png"
         if mask_path.exists():
             answer = QMessageBox.question(
