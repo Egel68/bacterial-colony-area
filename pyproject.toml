@@ -37,7 +37,7 @@ build-backend = "setuptools.build_meta"
 package = true
 
 [tool.setuptools.packages.find]
-include = ["analysis", "analysis.*", "ui", "ui.*", "utils", "utils.*", "labeling", "labeling.*", "train", "train.*"]
+include = ["analysis", "analysis.*", "ui", "ui.*", "utils", "utils.*", "labeling", "labeling.*", "train", "train.*", "testing", "testing.*"]
 
 [tool.setuptools]
 py-modules = ["main"]
@@ -45,3 +45,4 @@ py-modules = ["main"]
 [project.scripts]
 bacteria-analyzer = "main:main"
 augment = "train.augment:main"
+test-algorithms = "testing.__main__:main"

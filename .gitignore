@@ -13,6 +13,9 @@ build/
 train/data/
 train/runs/
 
+# Test reports
+test_report.html
+
 # IDE
 .vscode/
 .idea/
