@@ -53,6 +53,7 @@ jobs:
           uv run python scripts/nuitka_build.py `
             --standalone --onefile `
             --msvc=latest `
+            --assume-yes-for-downloads `
             --jobs=2 `
             --output-filename=BacteriaAnalyzer.exe `
             main.py
