@@ -1,4 +1,6 @@
 import os
+import shutil
+import zipfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -200,13 +202,13 @@ class PaintLabel(QLabel):
 
 
 class LabelingWindow(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, session_dir: Path, parent=None):
         super().__init__(parent)
-        base = Path(__file__).resolve().parent.parent
-        self.source_dir = base / "test_images" / "source"
-        self.masks_dir = base / "test_images" / "masks"
-        self.cropped_dir = base / "test_images" / "cropped"
-        self.cropped_masks_dir = base / "test_images" / "cropped_masks"
+        self.session_dir = session_dir.resolve()
+        self.source_dir = self.session_dir / "source"
+        self.masks_dir = self.session_dir / "masks"
+        self.cropped_dir = self.session_dir / "cropped"
+        self.cropped_masks_dir = self.session_dir / "cropped_masks"
 
         for d in [self.source_dir, self.masks_dir, self.cropped_dir, self.cropped_masks_dir]:
             d.mkdir(parents=True, exist_ok=True)
@@ -222,7 +224,7 @@ class LabelingWindow(QMainWindow):
         self._load_file_list()
 
     def _init_ui(self):
-        self.setWindowTitle("Разметка тестовых изображений")
+        self.setWindowTitle(f"Разметка — {self.session_dir.name}")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -270,6 +272,14 @@ class LabelingWindow(QMainWindow):
         )
         btn_refresh.clicked.connect(self._load_file_list)
         l.addWidget(btn_refresh)
+
+        btn_add = QPushButton("📂 Добавить изображения")
+        btn_add.setStyleSheet(
+            "background-color: #a6e3a1; color: #1e1e2e; font-weight: bold; "
+            "font-size: 12px; padding: 6px;"
+        )
+        btn_add.clicked.connect(self._on_add_images)
+        l.addWidget(btn_add)
 
         self._create_petri_panel(l)
 
@@ -450,6 +460,16 @@ class LabelingWindow(QMainWindow):
         btn_save.clicked.connect(self._on_save)
         hl.addWidget(btn_save)
 
+        hl.addSpacing(6)
+
+        btn_export = QPushButton("📦 Экспорт в ZIP")
+        btn_export.setStyleSheet(
+            "background-color: #f9e2af; color: #1e1e2e; font-weight: bold; "
+            "padding: 6px 14px;"
+        )
+        btn_export.clicked.connect(self._on_export_zip)
+        hl.addWidget(btn_export)
+
         parent.addWidget(bar)
 
     def _update_zoom_label(self):
@@ -517,6 +537,25 @@ class LabelingWindow(QMainWindow):
 
     def _get_mask_dir(self):
         return self.masks_dir if self.mode == "source" else self.cropped_masks_dir
+
+    def _on_add_images(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Выберите изображения для разметки",
+            str(Path.home()),
+            "Изображения (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp)"
+        )
+        if not files:
+            return
+        copied = 0
+        for src in map(Path, files):
+            dst = self.source_dir / src.name
+            shutil.copy2(str(src), str(dst))
+            copied += 1
+        self.status_label.setText(
+            f"📂 Скопировано изображений: {copied}"
+        )
+        self._load_file_list()
 
     def _on_mode_changed(self, index: int):
         self.mode = "source" if index == 0 else "cropped"
@@ -696,6 +735,30 @@ class LabelingWindow(QMainWindow):
             self, "Готово",
             f"Обрезок сохранён:\n{out_name}\n\n"
             f"Теперь можно размечать маску на обрезанном изображении."
+        )
+
+    def _on_export_zip(self):
+        zip_name = f"{self.session_dir.name}.zip"
+        zip_path = self.session_dir.parent / zip_name
+        if zip_path.exists():
+            answer = QMessageBox.question(
+                self,
+                "Экспорт в ZIP",
+                f"Файл {zip_name} уже существует. Перезаписать?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root_dir, dirs, files in os.walk(self.session_dir):
+                for file in files:
+                    full = Path(root_dir) / file
+                    arcname = full.relative_to(self.session_dir.parent)
+                    zf.write(str(full), str(arcname))
+        QMessageBox.information(
+            self,
+            "Экспорт завершён",
+            f"Архив сохранён:\n{zip_path}"
         )
 
     def _on_save(self):

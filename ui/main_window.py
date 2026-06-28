@@ -177,8 +177,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(label_layout)
 
     def _open_labeling(self):
-        self.labeling_window = LabelingWindow(self)
-        self.labeling_window.show()
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите или создайте папку для сессии разметки",
+            str(Path.home() / "BacteriaLabeling"),
+        )
+        if folder:
+            self.labeling_window = LabelingWindow(Path(folder), self)
+            self.labeling_window.show()
 
     def _open_file_dialog(self):
         """Открытие диалога выбора файла."""
