@@ -356,53 +356,55 @@ class LabelingWindow(QMainWindow):
             "QFrame { background-color: #181825; border-radius: 8px; }"
         )
         hl = QHBoxLayout(bar)
-        hl.setContentsMargins(12, 8, 12, 8)
-        hl.setSpacing(10)
+        hl.setContentsMargins(12, 4, 12, 4)
+        hl.setSpacing(6)
 
         hl.addWidget(QLabel("Размер кисти:"))
 
         btn_brush_minus = QPushButton("−")
-        btn_brush_minus.setFixedWidth(30)
-        btn_brush_minus.setStyleSheet("background-color: #45475a; padding: 4px; font-size: 14px;")
+        btn_brush_minus.setFixedWidth(24)
+        btn_brush_minus.setStyleSheet("background-color: #45475a; padding: 2px; font-size: 11px;")
         btn_brush_minus.clicked.connect(self._on_brush_decrease)
         hl.addWidget(btn_brush_minus)
 
         self.brush_size_label = QLabel("20 px")
-        self.brush_size_label.setFixedWidth(40)
+        self.brush_size_label.setFixedWidth(32)
         self.brush_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl.addWidget(self.brush_size_label)
 
         btn_brush_plus = QPushButton("+")
-        btn_brush_plus.setFixedWidth(30)
-        btn_brush_plus.setStyleSheet("background-color: #45475a; padding: 4px; font-size: 14px;")
+        btn_brush_plus.setFixedWidth(24)
+        btn_brush_plus.setStyleSheet("background-color: #45475a; padding: 2px; font-size: 11px;")
         btn_brush_plus.clicked.connect(self._on_brush_increase)
         hl.addWidget(btn_brush_plus)
 
         hl.addStretch()
 
         self.zoom_label = QLabel("100%")
-        self.zoom_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
-        self.zoom_label.setFixedWidth(50)
+        self.zoom_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self.zoom_label.setFixedWidth(36)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hl.addWidget(self.zoom_label)
 
-        btn_zoom_in = QPushButton("🔍+")
+        btn_zoom_in = QPushButton("+")
+        btn_zoom_in.setFixedWidth(24)
         btn_zoom_in.setStyleSheet(
-            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+            "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
         btn_zoom_in.clicked.connect(self._on_zoom_in)
         hl.addWidget(btn_zoom_in)
 
-        btn_zoom_out = QPushButton("🔍−")
+        btn_zoom_out = QPushButton("−")
+        btn_zoom_out.setFixedWidth(24)
         btn_zoom_out.setStyleSheet(
-            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+            "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
         btn_zoom_out.clicked.connect(self._on_zoom_out)
         hl.addWidget(btn_zoom_out)
 
-        btn_zoom_reset = QPushButton("⟲ 1:1")
+        btn_zoom_reset = QPushButton("1:1")
         btn_zoom_reset.setStyleSheet(
-            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+            "background-color: #45475a; padding: 2px 6px; font-size: 11px;"
         )
         btn_zoom_reset.clicked.connect(self._on_zoom_reset)
         hl.addWidget(btn_zoom_reset)
