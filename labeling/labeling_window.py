@@ -223,8 +223,6 @@ class LabelingWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("Разметка тестовых изображений")
-        geo = self.screen().availableGeometry()
-        self.setGeometry(geo)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -234,6 +232,10 @@ class LabelingWindow(QMainWindow):
 
         self._create_file_panel(root)
         self._create_image_area(root)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
 
     def _create_file_panel(self, root: QHBoxLayout):
         panel = QFrame()
