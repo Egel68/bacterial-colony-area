@@ -74,7 +74,7 @@ source .venv-dev/bin/activate
 
 ## CI
 
-`.github/workflows/build.yaml` — PyInstaller on push to `develop`/`main`. Python 3.13, matrix: ubuntu + windows. No tests, linting, typechecking, or formatting gates.
+`.github/workflows/build.yaml` — PyInstaller via `uv` on push to `develop`/`main`. Python 3.13, matrix: ubuntu + windows. Собирается runtime-окружение (без torch/CUDA), ~200–350 МБ. No tests, linting, typechecking, or formatting gates.
 
 ## What is NOT configured
 
