@@ -4,7 +4,7 @@ from typing import Dict, Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -30,6 +30,10 @@ SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp
 
 
 class PaintLabel(QLabel):
+    ZOOM_MIN = 0.1
+    ZOOM_MAX = 20.0
+    ZOOM_STEP = 1.15
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -44,13 +48,11 @@ class PaintLabel(QLabel):
         self.brush_size = 20
         self.is_drawing = True
         self._painting = False
-        self._scale = 1.0
-        self._offset_x = 0.0
-        self._offset_y = 0.0
+        self._zoom_factor = 1.0
         self._original_pixmap = None
         self.petri_info = None
         self.show_petri_circle = False
-        self.view_mode = 0  # 0=overlay, 1=mask-only
+        self.view_mode = 0
 
     def set_image(self, image: np.ndarray, mask: np.ndarray = None):
         self._image = image.copy()
@@ -59,6 +61,7 @@ class PaintLabel(QLabel):
             self._mask = mask.copy()
         else:
             self._mask = np.zeros((h, w), dtype=np.uint8)
+        self._zoom_factor = 1.0
         self._render()
 
     def set_petri_info(self, info: Optional[Dict]):
@@ -73,6 +76,22 @@ class PaintLabel(QLabel):
         if self._mask is not None:
             self._mask.fill(0)
             self._render()
+
+    def zoom_reset(self):
+        self._zoom_factor = 1.0
+        self._update_scaled()
+
+    def zoom_in(self):
+        self._zoom_factor = min(self.ZOOM_MAX, self._zoom_factor * self.ZOOM_STEP)
+        self._update_scaled()
+
+    def zoom_out(self):
+        self._zoom_factor = max(self.ZOOM_MIN, self._zoom_factor / self.ZOOM_STEP)
+        self._update_scaled()
+
+    @property
+    def zoom_percent(self) -> int:
+        return int(self._zoom_factor * 100)
 
     def _render(self):
         if self._image is None:
@@ -99,24 +118,57 @@ class PaintLabel(QLabel):
     def _update_scaled(self):
         if self._original_pixmap is None:
             return
+
+        orig_w = self._original_pixmap.width()
+        orig_h = self._original_pixmap.height()
+
+        scroll_area = self.parent()
+        if scroll_area and scroll_area.viewport():
+            viewport_size = scroll_area.viewport().size()
+        else:
+            viewport_size = self.size()
+
+        fit_scale = min(
+            viewport_size.width() / orig_w,
+            viewport_size.height() / orig_h,
+        )
+
+        current_scale = fit_scale * self._zoom_factor
+
+        new_w = max(1, int(orig_w * current_scale))
+        new_h = max(1, int(orig_h * current_scale))
+
         scaled = self._original_pixmap.scaled(
-            self.size(),
+            new_w, new_h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
         self.setPixmap(scaled)
+        self._scale = orig_w / new_w
+        self.updateGeometry()
 
-        self._scale = self._original_pixmap.width() / scaled.width()
-        self._offset_x = (self.width() - scaled.width()) / 2.0
-        self._offset_y = (self.height() - scaled.height()) / 2.0
+    def sizeHint(self):
+        if self.pixmap() and not self.pixmap().isNull():
+            return self.pixmap().size()
+        return super().sizeHint()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update_scaled()
+        if self._zoom_factor == 1.0:
+            self._update_scaled()
+
+    def wheelEvent(self, event):
+        if self._original_pixmap is None:
+            return
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_in()
+        elif delta < 0:
+            self.zoom_out()
 
     def _widget_to_image(self, pos: QPoint):
-        x = int((pos.x() - self._offset_x) * self._scale)
-        y = int((pos.y() - self._offset_y) * self._scale)
+        x = int(pos.x() * self._scale)
+        y = int(pos.y() * self._scale)
         return x, y
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -282,9 +334,13 @@ class LabelingWindow(QMainWindow):
         vl.addWidget(self.status_label)
 
         scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
+        scroll.setWidgetResizable(False)
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
+            "QScrollBar:vertical { background: #181825; width: 10px; }"
+            "QScrollBar:horizontal { background: #181825; height: 10px; }"
+            "QScrollBar::handle { background: #45475a; border-radius: 5px; }"
+            "QScrollBar::add-line, QScrollBar::sub-line { height: 0; }"
         )
         scroll.setWidget(self.paint_label)
         vl.addWidget(scroll, stretch=1)
@@ -313,6 +369,35 @@ class LabelingWindow(QMainWindow):
         self.brush_size_label = QLabel("20 px")
         self.brush_size_label.setFixedWidth(50)
         hl.addWidget(self.brush_size_label)
+
+        hl.addStretch()
+
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        self.zoom_label.setFixedWidth(50)
+        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hl.addWidget(self.zoom_label)
+
+        btn_zoom_in = QPushButton("🔍+")
+        btn_zoom_in.setStyleSheet(
+            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+        )
+        btn_zoom_in.clicked.connect(self._on_zoom_in)
+        hl.addWidget(btn_zoom_in)
+
+        btn_zoom_out = QPushButton("🔍−")
+        btn_zoom_out.setStyleSheet(
+            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+        )
+        btn_zoom_out.clicked.connect(self._on_zoom_out)
+        hl.addWidget(btn_zoom_out)
+
+        btn_zoom_reset = QPushButton("⟲ 1:1")
+        btn_zoom_reset.setStyleSheet(
+            "background-color: #45475a; padding: 4px 10px; font-size: 12px;"
+        )
+        btn_zoom_reset.clicked.connect(self._on_zoom_reset)
+        hl.addWidget(btn_zoom_reset)
 
         hl.addStretch()
 
@@ -353,6 +438,21 @@ class LabelingWindow(QMainWindow):
         hl.addWidget(btn_save)
 
         parent.addWidget(bar)
+
+    def _update_zoom_label(self):
+        self.zoom_label.setText(f"{self.paint_label.zoom_percent}%")
+
+    def _on_zoom_in(self):
+        self.paint_label.zoom_in()
+        self._update_zoom_label()
+
+    def _on_zoom_out(self):
+        self.paint_label.zoom_out()
+        self._update_zoom_label()
+
+    def _on_zoom_reset(self):
+        self.paint_label.zoom_reset()
+        self._update_zoom_label()
 
     def _on_brush_changed(self, value: int):
         self.brush_size_label.setText(f"{value} px")
@@ -465,6 +565,7 @@ class LabelingWindow(QMainWindow):
             self.status_label.setText(f"📷 {path.name}")
 
         self.paint_label.set_image(image_rgb, mask)
+        self._update_zoom_label()
 
         if self.mode == "source":
             self._on_auto_detect()

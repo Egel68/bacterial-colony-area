@@ -54,7 +54,7 @@ jobs:
             --standalone --onefile `
             --msvc=latest `
             --assume-yes-for-downloads `
-            --icon=icon.ico `
+            --windows-icon-from-ico=icon.ico `
             --jobs=2 `
             --output-filename=BacteriaAnalyzer.exe `
             main.py
