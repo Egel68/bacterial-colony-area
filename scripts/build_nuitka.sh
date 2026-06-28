@@ -15,15 +15,11 @@ if ! uv run python -c "import nuitka" 2>/dev/null; then
   uv pip install nuitka zstandard
 fi
 
-FLAGS=$(uv run python scripts/nuitka_flags.py)
-echo "=== Флаги: $FLAGS ==="
-
 echo "=== Запуск Nuitka ==="
-uv run nuitka \
+uv run python scripts/nuitka_build.py \
   --standalone \
   --onefile \
   --show-progress \
-  $FLAGS \
   --output-filename=BacteriaAnalyzer \
   main.py
 
