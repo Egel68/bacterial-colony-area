@@ -48,6 +48,8 @@ class PaintLabel(QLabel):
         self.is_drawing = True
         self._painting = False
         self._zoom_factor = 1.0
+        self._offset_x = 0.0
+        self._offset_y = 0.0
         self._original_pixmap = None
         self.petri_info = None
         self.show_petri_circle = False
@@ -147,6 +149,9 @@ class PaintLabel(QLabel):
         else:
             self.setMinimumSize(0, 0)
 
+        self._offset_x = (self.width() - scaled.width()) / 2.0
+        self._offset_y = (self.height() - scaled.height()) / 2.0
+
         self.updateGeometry()
 
     def resizeEvent(self, event):
@@ -163,8 +168,8 @@ class PaintLabel(QLabel):
             self.zoom_out()
 
     def _widget_to_image(self, pos: QPoint):
-        x = int(pos.x() * self._scale)
-        y = int(pos.y() * self._scale)
+        x = int((pos.x() - self._offset_x) * self._scale)
+        y = int((pos.y() - self._offset_y) * self._scale)
         return x, y
 
     def mousePressEvent(self, event: QMouseEvent):
