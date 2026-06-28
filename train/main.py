@@ -32,7 +32,7 @@ def _train(args):
 
         try:
             subprocess.Popen(
-                [sys.executable, "-m", "tensorboard",
+                [sys.executable, "-m", "tensorboard.main",
                  "--logdir", str(cfg.run_dir),
                  "--port", "6006"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
