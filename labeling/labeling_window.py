@@ -223,7 +223,8 @@ class LabelingWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("Разметка тестовых изображений")
-        self.showMaximized()
+        geo = self.screen().availableGeometry()
+        self.setGeometry(geo)
 
         central = QWidget()
         self.setCentralWidget(central)
