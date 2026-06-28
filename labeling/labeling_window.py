@@ -759,17 +759,16 @@ class LabelingWindow(QMainWindow):
         )
 
     def _on_export_zip(self):
-        zip_name = f"{self.session_dir.name}.zip"
-        zip_path = self.session_dir.parent / zip_name
-        if zip_path.exists():
-            answer = QMessageBox.question(
-                self,
-                "Экспорт в ZIP",
-                f"Файл {zip_name} уже существует. Перезаписать?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
+        default_name = f"{self.session_dir.name}.zip"
+        zip_path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить ZIP архив",
+            str(Path.home() / default_name),
+            "ZIP архивы (*.zip)"
+        )
+        if not zip_path_str:
+            return
+        zip_path = Path(zip_path_str)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for root_dir, dirs, files in os.walk(self.session_dir):
                 for file in files:
