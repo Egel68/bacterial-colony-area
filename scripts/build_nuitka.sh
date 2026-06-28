@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Сборка BacteriaAnalyzer через Nuitka (один бинарник)
-# Запуск: bash scripts/build_nuitka.sh
-# Результат: ./BacteriaAnalyzer (~120–150 МБ)
-
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -19,19 +15,15 @@ if ! uv run python -c "import nuitka" 2>/dev/null; then
   uv pip install nuitka zstandard
 fi
 
+FLAGS=$(uv run python scripts/nuitka_flags.py)
+echo "=== Флаги: $FLAGS ==="
+
 echo "=== Запуск Nuitka ==="
 uv run nuitka \
   --standalone \
   --onefile \
   --show-progress \
-  --enable-plugin=pyqt6 \
-  --include-package=ui \
-  --include-package=analysis \
-  --include-package=utils \
-  --include-package=labeling \
-  --include-module=cv2 \
-  --include-module=albumentations \
-  --include-module=tqdm \
+  $FLAGS \
   --output-filename=BacteriaAnalyzer \
   main.py
 

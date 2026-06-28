@@ -32,14 +32,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y g++ patchelf
 
-      - name: Setup MSYS2 (MinGW)
-        if: matrix.os == 'windows-latest'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-libs
-
       - name: Install project dependencies
         run: uv sync
 
@@ -48,39 +40,18 @@ jobs:
 
       - name: Build executable (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          uv run -- nuitka \
-            --standalone \
-            --onefile \
-            --enable-plugin=pyqt6 \
-            --include-package=ui \
-            --include-package=analysis \
-            --include-package=utils \
-            --include-package=labeling \
-            --include-module=cv2 \
-            --include-module=albumentations \
-            --include-module=tqdm \
+        run: uv run python scripts/nuitka_build.py \
+            --standalone --onefile \
             --output-filename=BacteriaAnalyzer \
             main.py
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: |
-          uv run -- nuitka `
-            --standalone `
-            --onefile `
-            --mingw64 `
-            --enable-plugin=pyqt6 `
-            --include-package=ui `
-            --include-package=analysis `
-            --include-package=utils `
-            --include-package=labeling `
-            --include-module=cv2 `
-            --include-module=albumentations `
-            --include-module=tqdm `
-            --output-filename=BacteriaAnalyzer.exe `
+        run: uv run python scripts/nuitka_build.py `
+            --standalone --onefile `
             --jobs=2 `
+            --output-filename=BacteriaAnalyzer.exe `
             main.py
 
       - name: Upload artifact (Linux)
