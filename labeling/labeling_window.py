@@ -122,11 +122,8 @@ class PaintLabel(QLabel):
         orig_w = self._original_pixmap.width()
         orig_h = self._original_pixmap.height()
 
-        scroll_area = self.parent()
-        if scroll_area and scroll_area.viewport():
-            viewport_size = scroll_area.viewport().size()
-        else:
-            viewport_size = self.size()
+        parent_widget = self.parentWidget()
+        viewport_size = parent_widget.size() if parent_widget else self.size()
 
         fit_scale = min(
             viewport_size.width() / orig_w,
