@@ -7,6 +7,9 @@ from .params import AnalysisParams
 from .results import AnalysisResult
 
 __all__ = [
-    "ColonyDetector", "ImageProcessor",
-    "PetriInfo", "AnalysisParams", "AnalysisResult",
+    "ColonyDetector",
+    "ImageProcessor",
+    "PetriInfo",
+    "AnalysisParams",
+    "AnalysisResult",
 ]

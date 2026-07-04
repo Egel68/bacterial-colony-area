@@ -25,7 +25,6 @@ class TestLoadImage:
         if not test_source_paths:
             pytest.skip("no test images available")
         img = load_image(str(test_source_paths[0]))
-        b, g, r = img[100, 100, 0], img[100, 100, 1], img[100, 100, 2]
         assert img.shape[2] == 3
 
     def test_nonexistent_path(self):

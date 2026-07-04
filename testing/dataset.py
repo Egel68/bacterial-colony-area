@@ -28,7 +28,7 @@ class TestDataset:
 
     def _find_pair(self, stem: str, ext: str, directory: Path) -> Optional[str]:
         """Ищет файл {stem}_mask.{ext} или {stem}{ext} в указанной директории."""
-        for suffix in [f"_mask", f"_cropped", f"_cropped_mask", ""]:
+        for suffix in ["_mask", "_cropped", "_cropped_mask", ""]:
             candidate = directory / f"{stem}{suffix}{ext}"
             if candidate.exists():
                 return str(candidate)
@@ -72,15 +72,17 @@ class TestDataset:
                 cropped_mask = cv2.imread(str(cropped_mask_path), cv2.IMREAD_GRAYSCALE)
                 cropped_path = str(cropped_path_candidate)
 
-            self.samples.append(TestSample(
-                name=stem,
-                source_image=source_img,
-                source_mask=source_mask,
-                cropped_image=cropped_img,
-                cropped_mask=cropped_mask,
-                source_path=str(source_path),
-                cropped_path=cropped_path,
-            ))
+            self.samples.append(
+                TestSample(
+                    name=stem,
+                    source_image=source_img,
+                    source_mask=source_mask,
+                    cropped_image=cropped_img,
+                    cropped_mask=cropped_mask,
+                    source_path=str(source_path),
+                    cropped_path=cropped_path,
+                )
+            )
 
     def __len__(self) -> int:
         return len(self.samples)

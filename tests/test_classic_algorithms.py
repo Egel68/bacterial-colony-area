@@ -9,17 +9,19 @@ from testing.classic_algorithms import (
     ClassicLowSensitivity,
 )
 from testing.dataset import TestDataset
-from testing.metrics import compute_segmentation_metrics
 from testing.runner import run_algorithm, _mean_metrics
 
 
 class TestAlgorithmsRun:
-    @pytest.mark.parametrize("algo_cls", [
-        ClassicDefault,
-        ClassicHighSensitivity,
-        ClassicSolidFill,
-        ClassicLowSensitivity,
-    ])
+    @pytest.mark.parametrize(
+        "algo_cls",
+        [
+            ClassicDefault,
+            ClassicHighSensitivity,
+            ClassicSolidFill,
+            ClassicLowSensitivity,
+        ],
+    )
     def test_each_returns_mask(self, algo_cls, test_source_paths):
         if not test_source_paths:
             pytest.skip("no test images available")

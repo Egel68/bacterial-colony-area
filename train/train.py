@@ -9,10 +9,10 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from .config import TrainingConfig
-
-log = logging.getLogger(__name__)
 from .dataset import make_datasets
 from .models import get_model
+
+log = logging.getLogger(__name__)
 
 
 def train_epoch(
@@ -74,14 +74,22 @@ def run_training(
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     log.info("Device: %s", device)
 
-    train_ds, val_ds = make_datasets(cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment)
-    train_loader = DataLoader(train_ds, cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
-    val_loader = DataLoader(val_ds, cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
+    train_ds, val_ds = make_datasets(
+        cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment
+    )
+    train_loader = DataLoader(
+        train_ds, cfg.batch_size, shuffle=True, num_workers=cfg.num_workers
+    )
+    val_loader = DataLoader(
+        val_ds, cfg.batch_size, shuffle=False, num_workers=cfg.num_workers
+    )
     log.info("Train: %d | Val: %d", len(train_ds), len(val_ds))
 
     model = get_model(cfg.model_name)
     model = model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

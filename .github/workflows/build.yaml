@@ -35,6 +35,12 @@ jobs:
       - name: Install project dependencies
         run: uv sync --extra test
 
+      - name: Lint and format check
+        run: |
+          uv pip install ruff
+          uv run ruff check .
+          uv run ruff format --check .
+
       - name: Run tests (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |

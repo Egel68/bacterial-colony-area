@@ -5,7 +5,9 @@ from .interface import BaseDetectionAlgorithm
 _REGISTRY: dict[str, Type[BaseDetectionAlgorithm]] = {}
 
 
-def register_algorithm(cls: Type[BaseDetectionAlgorithm]) -> Type[BaseDetectionAlgorithm]:
+def register_algorithm(
+    cls: Type[BaseDetectionAlgorithm],
+) -> Type[BaseDetectionAlgorithm]:
     _REGISTRY[cls.__name__] = cls
     return cls
 

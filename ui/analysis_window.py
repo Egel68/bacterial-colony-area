@@ -122,26 +122,26 @@ class AnalysisWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
-        l = QVBoxLayout(image_frame)
+        vl = QVBoxLayout(image_frame)
 
         self.image_header = QLabel("Оригинальное изображение")
         self.image_header.setStyleSheet("color: #89b4fa; font-weight: bold;")
         self.image_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.addWidget(self.image_header)
+        vl.addWidget(self.image_header)
 
         self.image_label = ImageLabel()
-        l.addWidget(self.image_label)
+        vl.addWidget(self.image_label)
 
         self.status_label = QLabel("Готов к работе")
         self.status_label.setStyleSheet("color: #a6adc8;")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.addWidget(self.status_label)
+        vl.addWidget(self.status_label)
 
         layout.addWidget(image_frame, stretch=2)
 
     def _create_view_controls(self, layout: QVBoxLayout):
         group = QGroupBox("👁️ Режим просмотра")
-        l = QVBoxLayout(group)
+        vl = QVBoxLayout(group)
 
         self.view_mode_combo = QComboBox()
         self.view_mode_combo.addItems(
@@ -153,57 +153,57 @@ class AnalysisWindow(QMainWindow):
             ]
         )
         self.view_mode_combo.currentIndexChanged.connect(self._update_display)
-        l.addWidget(self.view_mode_combo)
+        vl.addWidget(self.view_mode_combo)
 
         self.show_petri_contour = QCheckBox("Показать контур чашки")
         self.show_petri_contour.setChecked(True)
         self.show_petri_contour.stateChanged.connect(self._update_display)
-        l.addWidget(self.show_petri_contour)
+        vl.addWidget(self.show_petri_contour)
 
         self.show_area_overlay = QCheckBox("Закрасить колонии")
         self.show_area_overlay.setChecked(True)
         self.show_area_overlay.stateChanged.connect(self._update_display)
-        l.addWidget(self.show_area_overlay)
+        vl.addWidget(self.show_area_overlay)
 
         layout.addWidget(group)
 
     def _create_geometry_controls(self, layout: QVBoxLayout):
         group = QGroupBox("📏 Геометрия чашки")
-        l = QFormLayout(group)
+        vl = QFormLayout(group)
 
         self.spin_x = QSpinBox()
         self.spin_x.setRange(0, 5000)
         self.spin_x.setSuffix(" px")
         self.spin_x.valueChanged.connect(self._on_geometry_changed)
-        l.addRow("Центр X:", self.spin_x)
+        vl.addRow("Центр X:", self.spin_x)
 
         self.spin_y = QSpinBox()
         self.spin_y.setRange(0, 5000)
         self.spin_y.setSuffix(" px")
         self.spin_y.valueChanged.connect(self._on_geometry_changed)
-        l.addRow("Центр Y:", self.spin_y)
+        vl.addRow("Центр Y:", self.spin_y)
 
         self.spin_radius = QSpinBox()
         self.spin_radius.setRange(10, 3000)
         self.spin_radius.setSuffix(" px")
         self.spin_radius.valueChanged.connect(self._on_geometry_changed)
-        l.addRow("Радиус:", self.spin_radius)
+        vl.addRow("Радиус:", self.spin_radius)
 
         btn_reset = QPushButton("Сбросить к авто-поиску")
         btn_reset.setStyleSheet(
             "background-color: #45475a; font-size: 11px; padding: 5px;"
         )
         btn_reset.clicked.connect(self._reset_geometry)
-        l.addRow(btn_reset)
+        vl.addRow(btn_reset)
 
         layout.addWidget(group)
 
     def _create_algorithm_controls(self, layout: QVBoxLayout):
         group = QGroupBox("⚙️ Параметры алгоритма")
-        l = QVBoxLayout(group)
+        vl = QVBoxLayout(group)
 
         # Чувствительность
-        l.addWidget(QLabel("Чувствительность:"))
+        vl.addWidget(QLabel("Чувствительность:"))
         h_sens = QHBoxLayout()
         self.slider_sens = QSlider(Qt.Orientation.Horizontal)
         self.slider_sens.setRange(1, 100)
@@ -214,10 +214,10 @@ class AnalysisWindow(QMainWindow):
         self.label_sens = QLabel("50%")
         h_sens.addWidget(self.slider_sens)
         h_sens.addWidget(self.label_sens)
-        l.addLayout(h_sens)
+        vl.addLayout(h_sens)
 
         # Контраст
-        l.addWidget(QLabel("Усиление контраста:"))
+        vl.addWidget(QLabel("Усиление контраста:"))
         h_cont = QHBoxLayout()
         self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
         self.slider_contrast.setRange(5, 30)
@@ -228,24 +228,24 @@ class AnalysisWindow(QMainWindow):
         self.label_contrast = QLabel("1.0x")
         h_cont.addWidget(self.slider_contrast)
         h_cont.addWidget(self.label_contrast)
-        l.addLayout(h_cont)
+        vl.addLayout(h_cont)
 
         # Отступ
-        l.addWidget(QLabel("Отступ от края (%):"))
+        vl.addWidget(QLabel("Отступ от края (%):"))
         self.spin_margin = QDoubleSpinBox()
         self.spin_margin.setRange(0, 30)
         self.spin_margin.setValue(8.0)
-        l.addWidget(self.spin_margin)
+        vl.addWidget(self.spin_margin)
 
         # Мин размер
-        l.addWidget(QLabel("Мин. размер колонии (px):"))
+        vl.addWidget(QLabel("Мин. размер колонии (px):"))
         self.spin_min_size = QSpinBox()
         self.spin_min_size.setRange(1, 1000)
         self.spin_min_size.setValue(50)
-        l.addWidget(self.spin_min_size)
+        vl.addWidget(self.spin_min_size)
 
         # --- Секция сплошных зон (НОВАЯ) ---
-        l.addSpacing(10)
+        vl.addSpacing(10)
         fill_frame = QFrame()
         fill_frame.setStyleSheet(
             "background-color: #313244; border-radius: 6px; padding: 5px;"
@@ -269,7 +269,7 @@ class AnalysisWindow(QMainWindow):
         fill_h.addWidget(self.spin_fill_strength)
         fill_layout.addLayout(fill_h)
 
-        l.addWidget(fill_frame)
+        vl.addWidget(fill_frame)
         # ------------------------------------
 
         btn_apply = QPushButton("🔄 Пересчитать")
@@ -277,17 +277,17 @@ class AnalysisWindow(QMainWindow):
             "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; margin-top: 10px;"
         )
         btn_apply.clicked.connect(self._run_colony_analysis_only)
-        l.addWidget(btn_apply)
+        vl.addWidget(btn_apply)
 
         layout.addWidget(group)
 
     def _create_results_panel(self, layout: QVBoxLayout):
         group = QGroupBox("📊 Результаты")
-        l = QVBoxLayout(group)
+        vl = QVBoxLayout(group)
         self.text_results = QTextEdit()
         self.text_results.setReadOnly(True)
         self.text_results.setMaximumHeight(150)
-        l.addWidget(self.text_results)
+        vl.addWidget(self.text_results)
         layout.addWidget(group)
 
     def _create_action_buttons(self, layout: QVBoxLayout):
@@ -341,7 +341,10 @@ class AnalysisWindow(QMainWindow):
         r = self.spin_radius.value()
         h, w = self.original_image.shape[:2]
         self.petri_info = PetriInfo(
-            cx=cx, cy=cy, radius=r, image_shape=(h, w),
+            cx=cx,
+            cy=cy,
+            radius=r,
+            image_shape=(h, w),
         )
         self.petri_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(self.petri_mask, (cx, cy), r, 255, -1)
@@ -435,9 +438,7 @@ class AnalysisWindow(QMainWindow):
                 )
                 margin = self.spin_margin.value()
                 r_inner = int(self.petri_info.radius * (100 - margin) / 100)
-                cv2.circle(
-                    final_img, self.petri_info.center, r_inner, (255, 255, 0), 1
-                )
+                cv2.circle(final_img, self.petri_info.center, r_inner, (255, 255, 0), 1)
 
             colony_mask = self.controller.colony_mask
             if self.show_area_overlay.isChecked() and colony_mask is not None:

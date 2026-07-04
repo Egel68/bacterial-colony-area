@@ -1,4 +1,3 @@
-import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -8,7 +7,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 
-from utils.image_loader import load_image, load_image_grayscale
+from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -43,9 +42,7 @@ class PaintLabel(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(400, 400)
         self.setStyleSheet("background-color: #11111b; border-radius: 8px;")
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._image = None
         self._mask = None
@@ -142,7 +139,8 @@ class PaintLabel(QLabel):
         new_h = max(1, int(orig_h * current_scale))
 
         scaled = self._original_pixmap.scaled(
-            new_w, new_h,
+            new_w,
+            new_h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -178,10 +176,7 @@ class PaintLabel(QLabel):
         return x, y
 
     def mousePressEvent(self, event: QMouseEvent):
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self._mask is not None
-        ):
+        if event.button() == Qt.MouseButton.LeftButton and self._mask is not None:
             self._painting = True
             self._paint_at(self._widget_to_image(event.pos()))
 
@@ -245,18 +240,18 @@ class LabelingWindow(QMainWindow):
         panel.setStyleSheet(
             "QFrame { background-color: #181825; border-radius: 10px; }"
         )
-        l = QVBoxLayout(panel)
-        l.setContentsMargins(10, 10, 10, 10)
-        l.setSpacing(8)
+        vl = QVBoxLayout(panel)
+        vl.setContentsMargins(10, 10, 10, 10)
+        vl.setSpacing(8)
 
         title = QLabel("📁 Тестовые изображения")
         title.setStyleSheet("font-weight: bold; font-size: 14px; color: #89b4fa;")
-        l.addWidget(title)
+        vl.addWidget(title)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["📁 Исходные изображения", "✂️ Обрезки чашек"])
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        l.addWidget(self.mode_combo)
+        vl.addWidget(self.mode_combo)
 
         self.file_list = QListWidget()
         self.file_list.setStyleSheet(
@@ -264,14 +259,14 @@ class LabelingWindow(QMainWindow):
             "QListWidget::item:selected { background-color: #89b4fa; color: #1e1e2e; }"
         )
         self.file_list.itemClicked.connect(self._on_file_selected)
-        l.addWidget(self.file_list, stretch=1)
+        vl.addWidget(self.file_list, stretch=1)
 
         btn_refresh = QPushButton("🔄 Обновить")
         btn_refresh.setStyleSheet(
             "background-color: #45475a; font-size: 12px; padding: 6px;"
         )
         btn_refresh.clicked.connect(self._load_file_list)
-        l.addWidget(btn_refresh)
+        vl.addWidget(btn_refresh)
 
         btn_add = QPushButton("📂 Добавить изображения")
         btn_add.setStyleSheet(
@@ -279,9 +274,9 @@ class LabelingWindow(QMainWindow):
             "font-size: 12px; padding: 6px;"
         )
         btn_add.clicked.connect(self._on_add_images)
-        l.addWidget(btn_add)
+        vl.addWidget(btn_add)
 
-        self._create_petri_panel(l)
+        self._create_petri_panel(vl)
 
         root.addWidget(panel)
 
@@ -365,9 +360,7 @@ class LabelingWindow(QMainWindow):
 
     def _create_toolbar(self, parent: QVBoxLayout):
         bar = QFrame()
-        bar.setStyleSheet(
-            "QFrame { background-color: #181825; border-radius: 8px; }"
-        )
+        bar.setStyleSheet("QFrame { background-color: #181825; border-radius: 8px; }")
         hl = QHBoxLayout(bar)
         hl.setContentsMargins(12, 4, 12, 4)
         hl.setSpacing(6)
@@ -376,7 +369,9 @@ class LabelingWindow(QMainWindow):
 
         btn_brush_minus = QPushButton("−")
         btn_brush_minus.setFixedWidth(24)
-        btn_brush_minus.setStyleSheet("background-color: #45475a; padding: 2px; font-size: 11px;")
+        btn_brush_minus.setStyleSheet(
+            "background-color: #45475a; padding: 2px; font-size: 11px;"
+        )
         btn_brush_minus.clicked.connect(self._on_brush_decrease)
         hl.addWidget(btn_brush_minus)
 
@@ -387,7 +382,9 @@ class LabelingWindow(QMainWindow):
 
         btn_brush_plus = QPushButton("+")
         btn_brush_plus.setFixedWidth(24)
-        btn_brush_plus.setStyleSheet("background-color: #45475a; padding: 2px; font-size: 11px;")
+        btn_brush_plus.setStyleSheet(
+            "background-color: #45475a; padding: 2px; font-size: 11px;"
+        )
         btn_brush_plus.clicked.connect(self._on_brush_increase)
         hl.addWidget(btn_brush_plus)
 
@@ -439,9 +436,7 @@ class LabelingWindow(QMainWindow):
         hl.addWidget(self.btn_draw)
 
         self.btn_erase = QPushButton("🧹 Ластик")
-        self.btn_erase.setStyleSheet(
-            "background-color: #45475a; padding: 6px 14px;"
-        )
+        self.btn_erase.setStyleSheet("background-color: #45475a; padding: 6px 14px;")
         self.btn_erase.clicked.connect(lambda: self._set_mode(False))
         hl.addWidget(self.btn_erase)
 
@@ -512,9 +507,7 @@ class LabelingWindow(QMainWindow):
                 "background-color: #45475a; padding: 6px 14px;"
             )
         else:
-            self.btn_draw.setStyleSheet(
-                "background-color: #45475a; padding: 6px 14px;"
-            )
+            self.btn_draw.setStyleSheet("background-color: #45475a; padding: 6px 14px;")
             self.btn_erase.setStyleSheet(
                 "background-color: #f38ba8; color: #1e1e2e; font-weight: bold; "
                 "padding: 6px 14px;"
@@ -543,7 +536,7 @@ class LabelingWindow(QMainWindow):
             self,
             "Выберите изображения для разметки",
             str(Path.home()),
-            "Изображения (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp)"
+            "Изображения (*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp)",
         )
         if not files:
             return
@@ -554,9 +547,7 @@ class LabelingWindow(QMainWindow):
             dst = dst_dir / src.name
             shutil.copy2(str(src), str(dst))
             copied += 1
-        self.status_label.setText(
-            f"📂 Скопировано изображений: {copied}"
-        )
+        self.status_label.setText(f"📂 Скопировано изображений: {copied}")
         self._load_file_list()
 
     def _on_mode_changed(self, index: int):
@@ -575,9 +566,7 @@ class LabelingWindow(QMainWindow):
         self.paint_label._mask = None
         self.paint_label._original_pixmap = None
         self.paint_label.clear()
-        self.status_label.setText(
-            "Выберите изображение из списка слева"
-        )
+        self.status_label.setText("Выберите изображение из списка слева")
 
     def _load_file_list(self):
         self.file_list.clear()
@@ -592,9 +581,7 @@ class LabelingWindow(QMainWindow):
         try:
             image_rgb = self.controller.load_image_rgb(str(path))
         except ValueError:
-            QMessageBox.warning(
-                self, "Ошибка", f"Не удалось загрузить {path.name}"
-            )
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить {path.name}")
             return
 
         self.current_stem = path.stem
@@ -634,7 +621,10 @@ class LabelingWindow(QMainWindow):
             return
         h, w = self.paint_label._image.shape[:2]
         self.petri_info = PetriInfo(
-            cx=cx, cy=cy, radius=r, image_shape=(h, w),
+            cx=cx,
+            cy=cy,
+            radius=r,
+            image_shape=(h, w),
         )
         self.paint_label.petri_info = self.petri_info
         self.paint_label.show_petri_circle = True
@@ -670,20 +660,16 @@ class LabelingWindow(QMainWindow):
 
         self.paint_label._render()
         self.status_label.setText(
-            f"✅ Чашка найдена: центр ({info.cx}, {info.cy}), "
-            f"радиус {info.radius} px"
+            f"✅ Чашка найдена: центр ({info.cx}, {info.cy}), радиус {info.radius} px"
         )
 
     def _on_crop(self):
         if self.current_path is None:
-            QMessageBox.information(
-                self, "Обрезка", "Сначала выберите изображение."
-            )
+            QMessageBox.information(self, "Обрезка", "Сначала выберите изображение.")
             return
         if self.petri_info is None or self.petri_info.radius <= 0:
             QMessageBox.warning(
-                self, "Обрезка",
-                "Сначала найдите чашку Петри (авто-поиск или вручную)."
+                self, "Обрезка", "Сначала найдите чашку Петри (авто-поиск или вручную)."
             )
             return
 
@@ -719,9 +705,10 @@ class LabelingWindow(QMainWindow):
                 break
 
         QMessageBox.information(
-            self, "Готово",
+            self,
+            "Готово",
             f"Обрезок сохранён:\n{out_name}\n\n"
-            f"Теперь можно размечать маску на обрезанном изображении."
+            f"Теперь можно размечать маску на обрезанном изображении.",
         )
 
     def _on_export_zip(self):
@@ -730,16 +717,14 @@ class LabelingWindow(QMainWindow):
             self,
             "Сохранить ZIP архив",
             str(Path.home() / default_name),
-            "ZIP архивы (*.zip)"
+            "ZIP архивы (*.zip)",
         )
         if not zip_path_str:
             return
         zip_path = Path(zip_path_str)
         self.controller.export_session_to_zip(self.session_dir, zip_path)
         QMessageBox.information(
-            self,
-            "Экспорт завершён",
-            f"Архив сохранён:\n{zip_path}"
+            self, "Экспорт завершён", f"Архив сохранён:\n{zip_path}"
         )
 
     def _on_save(self):

@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import Dataset
 
 
 class ColonyDataset(Dataset):
@@ -32,8 +32,12 @@ class ColonyDataset(Dataset):
         if self.augment:
             image, mask = self._augment(image, mask)
 
-        image = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-        mask = cv2.resize(mask, (self.img_size, self.img_size), interpolation=cv2.INTER_NEAREST)
+        image = cv2.resize(
+            image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR
+        )
+        mask = cv2.resize(
+            mask, (self.img_size, self.img_size), interpolation=cv2.INTER_NEAREST
+        )
         mask = mask[None, :, :]
 
         image = image.astype(np.float32) / 255.0
@@ -44,7 +48,9 @@ class ColonyDataset(Dataset):
         mask = torch.from_numpy(mask)
         return image, mask
 
-    def _augment(self, image: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _augment(
+        self, image: np.ndarray, mask: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         if np.random.random() < 0.5:
             image = np.fliplr(image).copy()
             mask = np.fliplr(mask).copy()
@@ -54,8 +60,12 @@ class ColonyDataset(Dataset):
         angle = np.random.uniform(-180, 180)
         h, w = image.shape[:2]
         M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-        image = cv2.warpAffine(image, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        mask = cv2.warpAffine(mask, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        image = cv2.warpAffine(
+            image, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0
+        )
+        mask = cv2.warpAffine(
+            mask, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0
+        )
         return image, mask
 
 

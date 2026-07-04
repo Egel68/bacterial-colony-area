@@ -5,6 +5,7 @@ def register_model(name: str):
     def wrapper(cls):
         _REGISTRY[name] = cls
         return cls
+
     return wrapper
 
 
@@ -19,4 +20,4 @@ def list_models() -> list[str]:
     return sorted(_REGISTRY)
 
 
-from .unet import UNet  # noqa: E402 — triggers @register_model
+from .unet import UNet as UNet  # noqa: E402, F401 — triggers @register_model

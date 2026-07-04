@@ -23,7 +23,9 @@ def _mean_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
         mean = sum(values) / len(values)
         result[f"mean_{key}"] = mean
         if len(values) > 1:
-            result[f"std_{key}"] = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+            result[f"std_{key}"] = (
+                sum((v - mean) ** 2 for v in values) / len(values)
+            ) ** 0.5
         else:
             result[f"std_{key}"] = 0.0
     return result
@@ -40,12 +42,16 @@ def run_algorithm(
         results[sample_key] = {}
 
         source_mask_pred = algo.detect(sample.source_image, is_cropped=False)
-        source_metrics = compute_segmentation_metrics(source_mask_pred, sample.source_mask)
+        source_metrics = compute_segmentation_metrics(
+            source_mask_pred, sample.source_mask
+        )
         results[sample_key]["source"] = source_metrics
 
         if sample.cropped_image is not None and sample.cropped_mask is not None:
             cropped_mask_pred = algo.detect(sample.cropped_image, is_cropped=True)
-            cropped_metrics = compute_segmentation_metrics(cropped_mask_pred, sample.cropped_mask)
+            cropped_metrics = compute_segmentation_metrics(
+                cropped_mask_pred, sample.cropped_mask
+            )
             results[sample_key]["cropped"] = cropped_metrics
 
     return results

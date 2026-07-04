@@ -5,7 +5,13 @@ from dataclasses import dataclass
 class AppConfig:
     petri_diameter_mm: float = 90.0
     supported_formats: tuple[str, ...] = (
-        ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".webp",
     )
 
 

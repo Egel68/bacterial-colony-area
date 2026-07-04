@@ -5,14 +5,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 EXCLUDE = {
-    ".venv", ".venv-dev", "__pycache__",
+    ".venv",
+    ".venv-dev",
+    "__pycache__",
     "bacterial_colony_analyzer.egg-info",
-    ".git", ".github", "scripts",
-    "test_images", "test_data", "train",
+    ".git",
+    ".github",
+    "scripts",
+    "test_images",
+    "test_data",
+    "train",
 }
 
 packages = sorted(
-    e.name for e in ROOT.iterdir()
+    e.name
+    for e in ROOT.iterdir()
     if e.is_dir()
     and e.name not in EXCLUDE
     and not e.name.startswith(".")

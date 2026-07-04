@@ -46,14 +46,21 @@ class Up(nn.Module):
         x1 = self.up(x1)
         diffY = x2.size(2) - x1.size(2)
         diffX = x2.size(3) - x1.size(3)
-        x1 = nn.functional.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
+        x1 = nn.functional.pad(
+            x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2]
+        )
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
 
 @register_model("unet")
 class UNet(BaseSegmenter):
-    def __init__(self, n_channels: int = 3, n_classes: int = 1, features: tuple = (64, 128, 256, 512)):
+    def __init__(
+        self,
+        n_channels: int = 3,
+        n_classes: int = 1,
+        features: tuple = (64, 128, 256, 512),
+    ):
         super().__init__()
         self.inc = DoubleConv(n_channels, features[0])
         self.down1 = Down(features[0], features[1])

@@ -36,9 +36,7 @@ def _build_transforms() -> tuple[A.Compose, A.Compose]:
     )
     pixel = A.Compose(
         [
-            A.RandomBrightnessContrast(
-                brightness_limit=0.2, contrast_limit=0.2, p=0.8
-            ),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.8),
             A.GaussNoise(std_range=(0.01, 0.03), p=0.3),
             A.Blur(blur_limit=3, p=0.2),
             A.HueSaturationValue(
@@ -71,7 +69,9 @@ def _load_image_mask(
     return image, mask
 
 
-def _finalize(aug_img: np.ndarray, aug_mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _finalize(
+    aug_img: np.ndarray, aug_mask: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     if aug_img.dtype != np.uint8:
         aug_img = np.clip(np.round(aug_img), 0, 255).astype(np.uint8)
     if aug_mask.dtype != np.uint8:
@@ -81,7 +81,9 @@ def _finalize(aug_img: np.ndarray, aug_mask: np.ndarray) -> tuple[np.ndarray, np
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     random.seed(SEED)
 
     if not CROPPED_DIR.exists():
@@ -100,7 +102,10 @@ def main() -> None:
     total = len(image_paths) * AUGMENTATIONS_PER_IMAGE
     log.info(
         "Аугментация: %d исходников × %d = %d пар → %s",
-        len(image_paths), AUGMENTATIONS_PER_IMAGE, total, OUT_IMAGES_DIR.parent,
+        len(image_paths),
+        AUGMENTATIONS_PER_IMAGE,
+        total,
+        OUT_IMAGES_DIR.parent,
     )
 
     index = 0

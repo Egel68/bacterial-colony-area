@@ -8,8 +8,7 @@ import torch.nn as nn
 
 class BaseSegmenter(ABC, nn.Module):
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        ...
+    def forward(self, x: torch.Tensor) -> torch.Tensor: ...
 
     def predict(self, x: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
@@ -35,7 +34,7 @@ class BaseSegmenter(ABC, nn.Module):
         tp = (binary * target).sum().item()
         fp = (binary * (1 - target)).sum().item()
         fn = ((1 - binary) * target).sum().item()
-        tn = ((1 - binary) * (1 - target)).sum().item()
+        _tn = ((1 - binary) * (1 - target)).sum().item()
 
         iou = tp / (tp + fp + fn + smooth)
         dice = 2 * tp / (2 * tp + fp + fn + smooth)
@@ -55,6 +54,7 @@ class BaseSegmenter(ABC, nn.Module):
         self.eval()
         dummy = torch.randn(input_shape, device=next(self.parameters()).device)
         import warnings
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*dynamic_axes.*")
             torch.onnx.export(
@@ -70,6 +70,7 @@ class BaseSegmenter(ABC, nn.Module):
     @staticmethod
     def load_onnx(path: str):
         import onnxruntime
+
         return onnxruntime.InferenceSession(path)
 
     def preprocess(self, image: np.ndarray, img_size: int = 512) -> np.ndarray:

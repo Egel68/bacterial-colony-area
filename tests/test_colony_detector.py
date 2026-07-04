@@ -15,7 +15,9 @@ class TestFilterComponents:
         cv2.rectangle(mask, (5, 5), (7, 7), 255, -1)
         cv2.rectangle(mask, (50, 50), (69, 69), 255, -1)
         out = DETECTOR._filter_components(mask, min_size=10)
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(out, connectivity=8)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            out, connectivity=8
+        )
         assert num_labels - 1 == 1
         area = stats[1, cv2.CC_STAT_AREA]
         assert area == 400
@@ -45,7 +47,9 @@ class TestCreateInnerMask:
         mask = np.zeros((200, 200), dtype=np.uint8)
         cv2.circle(mask, (100, 100), 80, 255, -1)
         inner = DETECTOR.create_inner_mask(mask, petri_info, margin_percent=10)
-        contours, _ = cv2.findContours(inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         assert len(contours) > 0
         (x, y), radius = cv2.minEnclosingCircle(contours[0])
         assert int(radius) == pytest.approx(72, abs=1)
@@ -54,7 +58,9 @@ class TestCreateInnerMask:
         mask = np.zeros((200, 200), dtype=np.uint8)
         cv2.circle(mask, (100, 100), 80, 255, -1)
         inner = DETECTOR.create_inner_mask(mask, petri_info, margin_percent=0)
-        contours, _ = cv2.findContours(inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         assert len(contours) > 0
         (x, y), radius = cv2.minEnclosingCircle(contours[0])
         assert int(radius) == pytest.approx(79, abs=1)
@@ -77,15 +83,23 @@ class TestDetectColonies:
         h, w = synthetic_colony_image.shape[:2]
         center = (w // 2, h // 2)
         radius = min(w, h) // 2
-        petri_info = PetriInfo(cx=center[0], cy=center[1], radius=radius, image_shape=(h, w))
+        petri_info = PetriInfo(
+            cx=center[0], cy=center[1], radius=radius, image_shape=(h, w)
+        )
         petri_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(petri_mask, center, radius, 255, -1)
 
         params = AnalysisParams(
-            sensitivity=0.3, min_colony_size=10, margin_percent=5, contrast=1.0,
+            sensitivity=0.3,
+            min_colony_size=10,
+            margin_percent=5,
+            contrast=1.0,
         )
         colony_mask, _ = DETECTOR.detect_colonies(
-            synthetic_colony_image, petri_mask, params=params, petri_info=petri_info,
+            synthetic_colony_image,
+            petri_mask,
+            params=params,
+            petri_info=petri_info,
         )
         assert colony_mask.sum() > 0
         assert DETECTOR.count_colonies(colony_mask) >= 1

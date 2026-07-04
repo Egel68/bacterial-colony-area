@@ -3,7 +3,7 @@
 Содержит функции предобработки и фильтрации.
 """
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 import cv2
 import numpy as np

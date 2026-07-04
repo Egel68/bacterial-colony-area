@@ -37,7 +37,9 @@ def _build_per_algo_sections(all_results: AllResults) -> str:
                 if variant_key not in variants:
                     continue
                 m = variants[variant_key]
-                vals = "".join(f'<td class="num">{m.get(k, 0):.4f}</td>' for k in metric_keys)
+                vals = "".join(
+                    f'<td class="num">{m.get(k, 0):.4f}</td>' for k in metric_keys
+                )
                 rows += f"""<tr>
   <td>{sample_key}</td>
   <td>{variant_key}</td>
@@ -50,7 +52,7 @@ def _build_per_algo_sections(all_results: AllResults) -> str:
     <tr>
       <th>Image</th>
       <th>Type</th>
-      {"".join(f'<th>{l}</th>' for l in metric_labels)}
+      {"".join(f"<th>{label}</th>" for label in metric_labels)}
     </tr>
   </thead>
   <tbody>
@@ -64,14 +66,16 @@ def _build_per_algo_sections(all_results: AllResults) -> str:
 def _build_chart_data(summary: List[Dict]) -> str:
     data = []
     for entry in summary:
-        data.append({
-            "name": entry["name"],
-            "iou": entry.get("mean_iou", 0),
-            "dice": entry.get("mean_dice", 0),
-            "f1": entry.get("mean_f1", 0),
-            "precision": entry.get("mean_precision", 0),
-            "recall": entry.get("mean_recall", 0),
-        })
+        data.append(
+            {
+                "name": entry["name"],
+                "iou": entry.get("mean_iou", 0),
+                "dice": entry.get("mean_dice", 0),
+                "f1": entry.get("mean_f1", 0),
+                "precision": entry.get("mean_precision", 0),
+                "recall": entry.get("mean_recall", 0),
+            }
+        )
     return json.dumps(data, ensure_ascii=False)
 
 

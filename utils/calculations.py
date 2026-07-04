@@ -2,7 +2,7 @@
 Модуль для вычисления площадей и статистик.
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
 import cv2
 import numpy as np

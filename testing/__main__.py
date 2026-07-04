@@ -13,8 +13,12 @@ log = logging.getLogger(__name__)
 def main():
     setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Test colony detection algorithms")
-    parser.add_argument("--output", default="test_report.html", help="Output HTML report path")
-    parser.add_argument("--data-root", default="test_images", help="Test dataset root directory")
+    parser.add_argument(
+        "--output", default="test_report.html", help="Output HTML report path"
+    )
+    parser.add_argument(
+        "--data-root", default="test_images", help="Test dataset root directory"
+    )
     args = parser.parse_args()
 
     log.info("Loading dataset...")

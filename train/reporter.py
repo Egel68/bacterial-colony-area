@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 
 def _load_run_data(run_dir: Path) -> tuple[dict, list, list]:
@@ -13,16 +12,36 @@ def _load_run_data(run_dir: Path) -> tuple[dict, list, list]:
     return summary, train_log, val_log
 
 
-def _make_metrics_plot(train_hist: list[dict], val_hist: list[dict], metric: str) -> go.Figure:
+def _make_metrics_plot(
+    train_hist: list[dict], val_hist: list[dict], metric: str
+) -> go.Figure:
     fig = go.Figure()
     epochs = list(range(1, len(train_hist) + 1))
-    fig.add_trace(go.Scatter(x=epochs, y=[m[metric] for m in train_hist], mode="lines", name=f"train_{metric}"))
-    fig.add_trace(go.Scatter(x=epochs, y=[m[metric] for m in val_hist], mode="lines", name=f"val_{metric}"))
-    fig.update_layout(title=f"{metric.upper()} over epochs", xaxis_title="epoch", yaxis_title=metric)
+    fig.add_trace(
+        go.Scatter(
+            x=epochs,
+            y=[m[metric] for m in train_hist],
+            mode="lines",
+            name=f"train_{metric}",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=epochs,
+            y=[m[metric] for m in val_hist],
+            mode="lines",
+            name=f"val_{metric}",
+        )
+    )
+    fig.update_layout(
+        title=f"{metric.upper()} over epochs", xaxis_title="epoch", yaxis_title=metric
+    )
     return fig
 
 
-def generate_report(summary: dict, train_hist: list[dict], val_hist: list[dict], output_path: Path):
+def generate_report(
+    summary: dict, train_hist: list[dict], val_hist: list[dict], output_path: Path
+):
     figures = []
     for metric in ["loss", "iou", "dice", "precision", "recall"]:
         fig = _make_metrics_plot(train_hist, val_hist, metric)

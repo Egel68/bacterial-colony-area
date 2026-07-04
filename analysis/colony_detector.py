@@ -85,7 +85,10 @@ class ColonyDetector:
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
             return mask, PetriInfo(
-                cx=center[0], cy=center[1], radius=radius, image_shape=(h, w),
+                cx=center[0],
+                cy=center[1],
+                radius=radius,
+                image_shape=(h, w),
             )
 
         return self._detect_petri_with_hough(image)
@@ -114,7 +117,10 @@ class ColonyDetector:
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
             return mask, PetriInfo(
-                cx=center[0], cy=center[1], radius=radius, image_shape=(h, w),
+                cx=center[0],
+                cy=center[1],
+                radius=radius,
+                image_shape=(h, w),
             )
         return None, None
 
@@ -190,7 +196,9 @@ class ColonyDetector:
                 clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
             )
 
-        final_mask = self._filter_components(clean_binary, min_size=params.min_colony_size)
+        final_mask = self._filter_components(
+            clean_binary, min_size=params.min_colony_size
+        )
 
         debug_images: Dict = {"preprocessed": masked_diff, "binary": clean_binary}
 

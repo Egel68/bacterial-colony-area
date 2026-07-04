@@ -26,7 +26,8 @@ class AnalysisController:
         self._debug_images: Dict = {}
 
     def find_petri_dish(
-        self, image: np.ndarray,
+        self,
+        image: np.ndarray,
     ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
         return self._detector.detect_petri_dish(image)
 
@@ -39,11 +40,16 @@ class AnalysisController:
         blur_size: int = 5,
     ) -> AnalysisResult:
         self._colony_mask, self._debug_images = self._detector.detect_colonies(
-            image, petri_mask, params=params, petri_info=petri_info,
+            image,
+            petri_mask,
+            params=params,
+            petri_info=petri_info,
             blur_size=blur_size,
         )
         return self._calculator.calculate_areas(
-            petri_mask, self._colony_mask, petri_info,
+            petri_mask,
+            self._colony_mask,
+            petri_info,
             margin_percent=params.margin_percent,
         )
 

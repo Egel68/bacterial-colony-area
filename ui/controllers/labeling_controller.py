@@ -23,7 +23,9 @@ class LabelingController:
         image_bgr = load_image(path)
         return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-    def load_mask(self, path: Path, expected_shape: Tuple[int, int]) -> Optional[np.ndarray]:
+    def load_mask(
+        self, path: Path, expected_shape: Tuple[int, int]
+    ) -> Optional[np.ndarray]:
         if not path.exists():
             return None
         try:
@@ -39,7 +41,9 @@ class LabelingController:
         return info
 
     def crop_by_petri(
-        self, image_bgr: np.ndarray, petri_info: PetriInfo,
+        self,
+        image_bgr: np.ndarray,
+        petri_info: PetriInfo,
     ) -> np.ndarray:
         cx, cy = petri_info.cx, petri_info.cy
         r = petri_info.radius
@@ -92,6 +96,7 @@ class LabelingController:
         if not directory.exists():
             return []
         return sorted(
-            f for f in directory.iterdir()
+            f
+            for f in directory.iterdir()
             if f.suffix.lower() in self.SUPPORTED_EXTENSIONS
         )
