@@ -18,6 +18,10 @@ train/runs/**/report.html
 
 # Test reports
 test_report.html
+coverage/
+.coverage
+coverage.xml
+.coverage.*
 
 # IDE
 .vscode/

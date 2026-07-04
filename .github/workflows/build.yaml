@@ -33,7 +33,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y g++ patchelf
 
       - name: Install project dependencies
-        run: uv sync
+        run: uv sync --extra dev
+
+      - name: Run tests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install -y xvfb
+          uv run python -m pytest tests/ \
+            --cov=analysis --cov=utils --cov=testing \
+            --cov-report=term --cov-report=xml \
+            -v --tb=short -m "not slow"
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: uv run python -m pytest tests/ -v --tb=short -m "not slow and not gui"
 
       - name: Install Nuitka
         run: uv pip install nuitka zstandard
