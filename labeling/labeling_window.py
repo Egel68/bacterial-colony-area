@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 
 from analysis.colony_detector import ColonyDetector
+from analysis.geometry import PetriInfo
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 
@@ -70,7 +71,7 @@ class PaintLabel(QLabel):
         self._zoom_factor = 1.0
         self._render()
 
-    def set_petri_info(self, info: Optional[Dict]):
+    def set_petri_info(self, info: Optional[PetriInfo]):
         self.petri_info = info
         self._render()
 
@@ -112,8 +113,8 @@ class PaintLabel(QLabel):
             display = cv2.addWeighted(display, 1.0, green, 0.35, 0)
 
             if self.show_petri_circle and self.petri_info is not None:
-                center = self.petri_info["center"]
-                radius = self.petri_info["radius"]
+                center = self.petri_info.center
+                radius = self.petri_info.radius
                 cv2.circle(display, center, radius, (255, 100, 100), 2)
 
         h, w = display.shape[:2]
@@ -662,10 +663,12 @@ class LabelingWindow(QMainWindow):
         r = self.spin_radius.value()
         if r <= 0:
             return
-        self.petri_info = {
-            "center": (cx, cy),
-            "radius": r,
-        }
+        if self.paint_label._image is None:
+            return
+        h, w = self.paint_label._image.shape[:2]
+        self.petri_info = PetriInfo(
+            cx=cx, cy=cy, radius=r, image_shape=(h, w),
+        )
         self.paint_label.petri_info = self.petri_info
         self.paint_label.show_petri_circle = True
         self.paint_label._render()
@@ -691,17 +694,17 @@ class LabelingWindow(QMainWindow):
         self.spin_cx.blockSignals(True)
         self.spin_cy.blockSignals(True)
         self.spin_radius.blockSignals(True)
-        self.spin_cx.setValue(info["center"][0])
-        self.spin_cy.setValue(info["center"][1])
-        self.spin_radius.setValue(info["radius"])
+        self.spin_cx.setValue(info.cx)
+        self.spin_cy.setValue(info.cy)
+        self.spin_radius.setValue(info.radius)
         self.spin_cx.blockSignals(False)
         self.spin_cy.blockSignals(False)
         self.spin_radius.blockSignals(False)
 
         self.paint_label._render()
         self.status_label.setText(
-            f"✅ Чашка найдена: центр ({info['center'][0]}, {info['center'][1]}), "
-            f"радиус {info['radius']} px"
+            f"✅ Чашка найдена: центр ({info.cx}, {info.cy}), "
+            f"радиус {info.radius} px"
         )
 
     def _on_crop(self):
@@ -710,15 +713,15 @@ class LabelingWindow(QMainWindow):
                 self, "Обрезка", "Сначала выберите изображение."
             )
             return
-        if self.petri_info is None or self.petri_info["radius"] <= 0:
+        if self.petri_info is None or self.petri_info.radius <= 0:
             QMessageBox.warning(
                 self, "Обрезка",
                 "Сначала найдите чашку Петри (авто-поиск или вручную)."
             )
             return
 
-        cx, cy = self.petri_info["center"]
-        r = self.petri_info["radius"]
+        cx, cy = self.petri_info.cx, self.petri_info.cy
+        r = self.petri_info.radius
 
         try:
             image_bgr = load_image(str(self.current_path))

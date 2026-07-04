@@ -8,6 +8,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 
+from analysis.params import AnalysisParams
 from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 from analysis.colony_detector import ColonyDetector
+from analysis.geometry import PetriInfo
 from analysis.image_processor import ImageProcessor
 from utils.calculations import AreaCalculator
 
@@ -75,7 +77,7 @@ class AnalysisWindow(QMainWindow):
 
         self.petri_mask = None
         self.colony_mask = None
-        self.petri_info = None
+        self.petri_info: PetriInfo | None = None
         self.analysis_results = None
         self.debug_images = {}
 
@@ -315,9 +317,9 @@ class AnalysisWindow(QMainWindow):
 
         if self.petri_info:
             self._updating_ui = True
-            self.spin_x.setValue(self.petri_info["center"][0])
-            self.spin_y.setValue(self.petri_info["center"][1])
-            self.spin_radius.setValue(self.petri_info["radius"])
+            self.spin_x.setValue(self.petri_info.cx)
+            self.spin_y.setValue(self.petri_info.cy)
+            self.spin_radius.setValue(self.petri_info.radius)
             self._updating_ui = False
             self._run_colony_analysis_only()
         else:
@@ -325,11 +327,12 @@ class AnalysisWindow(QMainWindow):
                 self, "Ошибка", "Чашка Петри не найдена. Настройте вручную."
             )
             h, w = self.original_image.shape[:2]
-            self.petri_info = {
-                "center": (w // 2, h // 2),
-                "radius": int(min(w, h) * 0.4),
-                "area_px": 0,
-            }
+            self.petri_info = PetriInfo(
+                cx=w // 2,
+                cy=h // 2,
+                radius=int(min(w, h) * 0.4),
+                image_shape=(h, w),
+            )
             self._updating_ui = True
             self.spin_x.setValue(w // 2)
             self.spin_y.setValue(h // 2)
@@ -342,12 +345,10 @@ class AnalysisWindow(QMainWindow):
         cx = self.spin_x.value()
         cy = self.spin_y.value()
         r = self.spin_radius.value()
-        self.petri_info = {
-            "center": (cx, cy),
-            "radius": r,
-            "area_px": int(np.pi * r**2),
-        }
         h, w = self.original_image.shape[:2]
+        self.petri_info = PetriInfo(
+            cx=cx, cy=cy, radius=r, image_shape=(h, w),
+        )
         self.petri_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(self.petri_mask, (cx, cy), r, 255, -1)
         self._update_display()
@@ -361,46 +362,38 @@ class AnalysisWindow(QMainWindow):
 
         self.status_label.setText("Анализ колоний...")
 
-        # Считываем параметры UI
-        sensitivity = self.slider_sens.value() / 100.0
-        contrast = self.slider_contrast.value() / 10.0
-        min_size = self.spin_min_size.value()
-        margin = self.spin_margin.value()  # <--- Вот этот параметр
+        params = AnalysisParams(
+            sensitivity=self.slider_sens.value() / 100.0,
+            contrast=self.slider_contrast.value() / 10.0,
+            margin_percent=self.spin_margin.value(),
+            min_colony_size=self.spin_min_size.value(),
+            solid_fill=self.chk_solid_fill.isChecked(),
+            fill_strength=self.spin_fill_strength.value(),
+        )
 
-        use_solid_fill = self.chk_solid_fill.isChecked()
-        fill_strength = self.spin_fill_strength.value()
-
-        # Детекция...
         self.colony_mask, self.debug_images = self.detector.detect_colonies(
             self.original_image,
             self.petri_mask,
+            params=params,
             petri_info=self.petri_info,
-            sensitivity=sensitivity,
-            min_colony_size=min_size,
-            edge_margin_percent=margin,
-            contrast_level=contrast,
             blur_size=5,
-            use_solid_fill=use_solid_fill,
-            fill_strength=fill_strength,
         )
 
-        # Расчет площади с передачей margin_percent
         self.analysis_results = self.calculator.calculate_areas(
             self.petri_mask,
             self.colony_mask,
             self.petri_info,
-            margin_percent=margin,  # <--- ПЕРЕДАЕМ СЮДА
+            margin_percent=params.margin_percent,
         )
 
-        # Вывод результатов...
         res = self.analysis_results
         text = (
-            f"Количество колоний: {res['colony_count']}\n"
-            f"Покрытие (рабочей зоны): {res['coverage_percent']:.2f}%\n"
-            f"Площадь колоний: {res['colony_area_px']} px"
+            f"Количество колоний: {res.colony_count}\n"
+            f"Покрытие (рабочей зоны): {res.coverage_percent:.2f}%\n"
+            f"Площадь колоний: {res.colony_area_px} px"
         )
         self.text_results.setText(text)
-        self.status_label.setText(f"Готово. Найдено: {res['colony_count']}")
+        self.status_label.setText(f"Готово. Найдено: {res.colony_count}")
 
         self._update_display()
 
@@ -416,8 +409,8 @@ class AnalysisWindow(QMainWindow):
             if self.show_petri_contour.isChecked() and self.petri_info:
                 cv2.circle(
                     final_img,
-                    self.petri_info["center"],
-                    self.petri_info["radius"],
+                    self.petri_info.center,
+                    self.petri_info.radius,
                     (255, 0, 0),
                     2,
                 )
@@ -446,15 +439,15 @@ class AnalysisWindow(QMainWindow):
             if self.show_petri_contour.isChecked() and self.petri_info:
                 cv2.circle(
                     final_img,
-                    self.petri_info["center"],
-                    self.petri_info["radius"],
+                    self.petri_info.center,
+                    self.petri_info.radius,
                     (100, 100, 255),
                     2,
                 )
                 margin = self.spin_margin.value()
-                r_inner = int(self.petri_info["radius"] * (100 - margin) / 100)
+                r_inner = int(self.petri_info.radius * (100 - margin) / 100)
                 cv2.circle(
-                    final_img, self.petri_info["center"], r_inner, (255, 255, 0), 1
+                    final_img, self.petri_info.center, r_inner, (255, 255, 0), 1
                 )
 
             if self.show_area_overlay.isChecked() and self.colony_mask is not None:

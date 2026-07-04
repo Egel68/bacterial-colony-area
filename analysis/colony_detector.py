@@ -3,12 +3,14 @@
 Оптимизирован для темного поля (Dark Field) и изображений с бликами.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
 
+from .geometry import PetriInfo
 from .image_processor import ImageProcessor
+from .params import AnalysisParams
 
 
 class ColonyDetector:
@@ -27,7 +29,7 @@ class ColonyDetector:
 
     def detect_petri_dish(
         self, image: np.ndarray
-    ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
+    ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
         """
         Обнаружение чашки Петри.
         Использует тот факт, что края чашки на этих фото - самые яркие объекты (блики).
@@ -35,7 +37,6 @@ class ColonyDetector:
         gray = self.processor.to_grayscale(image)
         h, w = gray.shape
 
-        # 1. Грубая бинаризация для поиска ярких бликов по кругу
         blurred = cv2.GaussianBlur(gray, (9, 9), 2)
         _, bright_mask = cv2.threshold(blurred, 200, 255, cv2.THRESH_BINARY)
 
@@ -83,16 +84,15 @@ class ColonyDetector:
             center, radius = best_circle
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
-            petri_info = {
-                "center": center,
-                "radius": radius,
-                "area_px": int(np.pi * radius**2),
-            }
-            return mask, petri_info
+            return mask, PetriInfo(
+                cx=center[0], cy=center[1], radius=radius, image_shape=(h, w),
+            )
 
         return self._detect_petri_with_hough(image)
 
-    def _detect_petri_with_hough(self, image: np.ndarray) -> Tuple:
+    def _detect_petri_with_hough(
+        self, image: np.ndarray
+    ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
         gray = self.processor.to_grayscale(image)
         blurred = cv2.GaussianBlur(gray, (9, 9), 2)
         min_dim = min(image.shape[:2])
@@ -110,53 +110,42 @@ class ColonyDetector:
             circle = circles[0][0]
             center = (int(circle[0]), int(circle[1]))
             radius = int(circle[2])
+            h, w = image.shape[:2]
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
-            return mask, {
-                "center": center,
-                "radius": radius,
-                "area_px": int(np.pi * radius**2),
-            }
+            return mask, PetriInfo(
+                cx=center[0], cy=center[1], radius=radius, image_shape=(h, w),
+            )
         return None, None
 
     def create_inner_mask(
-        self, petri_mask: np.ndarray, petri_info: Dict, margin_percent: float = 5
+        self, petri_mask: np.ndarray, petri_info: PetriInfo, margin_percent: float = 5
     ) -> np.ndarray:
-        center = petri_info["center"]
-        radius = petri_info["radius"]
         real_margin = max(margin_percent, 1.0)
-        inner_radius = int(radius * (100 - real_margin) / 100)
+        inner_radius = int(petri_info.radius * (100 - real_margin) / 100)
         inner_mask = np.zeros_like(petri_mask)
-        cv2.circle(inner_mask, center, inner_radius, 255, -1)
+        cv2.circle(inner_mask, petri_info.center, inner_radius, 255, -1)
         return inner_mask
 
     def detect_colonies(
         self,
         image: np.ndarray,
         petri_mask: np.ndarray,
-        petri_info: Dict = None,
-        sensitivity: float = 0.5,
-        min_colony_size: int = 50,
-        edge_margin_percent: float = 10,
-        contrast_level: float = 1.0,
+        params: AnalysisParams,
+        petri_info: Optional[PetriInfo] = None,
         blur_size: int = 5,
-        # НОВЫЕ ПАРАМЕТРЫ
-        use_solid_fill: bool = False,  # Включить логику заполнения
-        fill_strength: int = 15,  # Размер ядра для закрытия дыр
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> tuple[np.ndarray, Dict]:
 
-        # 1. ROI
         if petri_info:
             roi_mask = self.create_inner_mask(
-                petri_mask, petri_info, edge_margin_percent
+                petri_mask, petri_info, params.margin_percent
             )
         else:
             roi_mask = petri_mask
 
-        # 2. Обработка
         channel = self.processor.extract_green_channel(image)
 
-        clip_limit = 2.0 * contrast_level
+        clip_limit = 2.0 * params.contrast
         enhanced = self.processor.apply_clahe(
             channel, clip_limit=clip_limit, grid_size=8
         )
@@ -169,7 +158,6 @@ class ColonyDetector:
         diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
         masked_diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
 
-        # 3. Бинаризация
         valid_pixels = masked_diff[roi_mask > 0]
         if len(valid_pixels) == 0:
             return np.zeros_like(channel), {}
@@ -177,43 +165,34 @@ class ColonyDetector:
         mean_val = np.mean(valid_pixels)
         std_val = np.std(valid_pixels)
 
-        k = 3.0 - (sensitivity * 2.5)
+        k = 3.0 - (params.sensitivity * 2.5)
         thresh_val = mean_val + k * std_val
         thresh_val = max(mean_val + 5, min(thresh_val, 254))
 
         _, binary = cv2.threshold(masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY)
 
-        # 4. Базовая очистка (удаление шума)
         kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         clean_binary = cv2.morphologyEx(
             binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
         )
 
-        # --- ЛОГИКА ЗАПОЛНЕНИЯ СПЛОШНЫХ ЗОН ---
-        if use_solid_fill:
-            # Шаг 1: Морфологическое закрытие (Closing)
-            # Это соединяет близко расположенные пятна "мазков"
-            fill_k_size = max(3, fill_strength)
+        if params.solid_fill:
+            fill_k_size = max(3, params.fill_strength)
             fill_kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
             )
             clean_binary = cv2.morphologyEx(clean_binary, cv2.MORPH_CLOSE, fill_kernel)
 
-            # Шаг 2: Заливка контуров (Hole Filling)
-            # Находим контуры и заливаем их внутренности
             contours = self._find_contours(clean_binary)
-            # Рисуем все контуры белым цветом и заливаем (-1)
             cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
         else:
-            # Стандартная обработка для одиночных колоний
             clean_binary = cv2.morphologyEx(
                 clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
             )
 
-        # 5. Фильтрация по размеру
-        final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
+        final_mask = self._filter_components(clean_binary, min_size=params.min_colony_size)
 
-        debug_images = {"preprocessed": masked_diff, "binary": clean_binary}
+        debug_images: Dict = {"preprocessed": masked_diff, "binary": clean_binary}
 
         return final_mask, debug_images
 

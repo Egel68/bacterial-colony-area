@@ -3,6 +3,8 @@ import numpy as np
 import pytest
 
 from analysis.colony_detector import ColonyDetector
+from analysis.geometry import PetriInfo
+from analysis.params import AnalysisParams
 
 DETECTOR = ColonyDetector()
 
@@ -67,9 +69,7 @@ class TestDetectPetriDish:
             pytest.skip("could not load test image")
         petri_mask, info = DETECTOR.detect_petri_dish(image)
         assert info is not None
-        assert "center" in info
-        assert "radius" in info
-        assert info["radius"] > 50
+        assert info.radius > 50
 
 
 class TestDetectColonies:
@@ -77,18 +77,15 @@ class TestDetectColonies:
         h, w = synthetic_colony_image.shape[:2]
         center = (w // 2, h // 2)
         radius = min(w, h) // 2
-        petri_info = {"center": center, "radius": radius, "area_px": int(np.pi * radius ** 2)}
+        petri_info = PetriInfo(cx=center[0], cy=center[1], radius=radius, image_shape=(h, w))
         petri_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(petri_mask, center, radius, 255, -1)
 
+        params = AnalysisParams(
+            sensitivity=0.3, min_colony_size=10, margin_percent=5, contrast=1.0,
+        )
         colony_mask, _ = DETECTOR.detect_colonies(
-            synthetic_colony_image,
-            petri_mask,
-            petri_info=petri_info,
-            sensitivity=0.3,
-            min_colony_size=10,
-            edge_margin_percent=5,
-            contrast_level=1.0,
+            synthetic_colony_image, petri_mask, params=params, petri_info=petri_info,
         )
         assert colony_mask.sum() > 0
         assert DETECTOR.count_colonies(colony_mask) >= 1

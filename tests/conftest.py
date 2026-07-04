@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
+from analysis.geometry import PetriInfo
+
 TEST_IMAGES = Path("test_images")
 
 
@@ -41,11 +43,7 @@ def petri_mask():
 
 @pytest.fixture
 def petri_info():
-    return {
-        "center": (100, 100),
-        "radius": 80,
-        "area_px": int(np.pi * 80 ** 2),
-    }
+    return PetriInfo(cx=100, cy=100, radius=80, image_shape=(200, 200))
 
 
 @pytest.fixture
