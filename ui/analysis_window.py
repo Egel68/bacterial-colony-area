@@ -32,10 +32,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from analysis.colony_detector import ColonyDetector
 from analysis.geometry import PetriInfo
-from analysis.image_processor import ImageProcessor
-from utils.calculations import AreaCalculator
+from .controllers.analysis_controller import AnalysisController
 
 
 class ImageLabel(QLabel):
@@ -68,18 +66,14 @@ class AnalysisWindow(QMainWindow):
         super().__init__(parent)
         self.image_path = image_path
 
-        self.processor = ImageProcessor()
-        self.detector = ColonyDetector()
-        self.calculator = AreaCalculator()
+        self.controller = AnalysisController()
 
         self.original_image = None
         self.display_image = None
 
         self.petri_mask = None
-        self.colony_mask = None
         self.petri_info: PetriInfo | None = None
         self.analysis_results = None
-        self.debug_images = {}
 
         self._updating_ui = False
 
@@ -311,7 +305,7 @@ class AnalysisWindow(QMainWindow):
 
     def _run_full_analysis(self):
         self.status_label.setText("Поиск чашки Петри...")
-        self.petri_mask, self.petri_info = self.detector.detect_petri_dish(
+        self.petri_mask, self.petri_info = self.controller.find_petri_dish(
             self.original_image
         )
 
@@ -371,19 +365,12 @@ class AnalysisWindow(QMainWindow):
             fill_strength=self.spin_fill_strength.value(),
         )
 
-        self.colony_mask, self.debug_images = self.detector.detect_colonies(
+        self.analysis_results = self.controller.analyze(
             self.original_image,
             self.petri_mask,
             params=params,
             petri_info=self.petri_info,
             blur_size=5,
-        )
-
-        self.analysis_results = self.calculator.calculate_areas(
-            self.petri_mask,
-            self.colony_mask,
-            self.petri_info,
-            margin_percent=params.margin_percent,
         )
 
         res = self.analysis_results
@@ -417,16 +404,18 @@ class AnalysisWindow(QMainWindow):
             self.image_header.setText("Оригинальное изображение")
 
         elif mode == 2:  # Preprocessed
-            if "preprocessed" in self.debug_images:
-                gray = self.debug_images["preprocessed"]
+            dbg = self.controller.debug_images
+            if "preprocessed" in dbg:
+                gray = dbg["preprocessed"]
                 final_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
                 self.image_header.setText("Усиленный контраст")
             else:
                 final_img = self.original_image.copy()
 
         elif mode == 3:  # Binary
-            if "binary" in self.debug_images:
-                mask = self.debug_images["binary"]
+            dbg = self.controller.debug_images
+            if "binary" in dbg:
+                mask = dbg["binary"]
                 final_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
                 self.image_header.setText("Бинарная маска")
             else:
@@ -450,12 +439,13 @@ class AnalysisWindow(QMainWindow):
                     final_img, self.petri_info.center, r_inner, (255, 255, 0), 1
                 )
 
-            if self.show_area_overlay.isChecked() and self.colony_mask is not None:
+            colony_mask = self.controller.colony_mask
+            if self.show_area_overlay.isChecked() and colony_mask is not None:
                 overlay = final_img.copy()
-                overlay[self.colony_mask > 0] = [0, 255, 0]
+                overlay[colony_mask > 0] = [0, 255, 0]
                 cv2.addWeighted(overlay, 0.4, final_img, 0.6, 0, final_img)
                 cnts, _ = cv2.findContours(
-                    self.colony_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                    colony_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
                 )
                 cv2.drawContours(final_img, cnts, -1, (0, 255, 0), 1)
 
