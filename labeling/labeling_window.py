@@ -8,6 +8,8 @@ import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
+
+from utils.image_loader import load_image, load_image_grayscale
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -610,8 +612,9 @@ class LabelingWindow(QMainWindow):
 
     def _on_file_selected(self, item: QListWidgetItem):
         path = Path(item.data(Qt.ItemDataRole.UserRole))
-        image_bgr = cv2.imread(str(path))
-        if image_bgr is None:
+        try:
+            image_bgr = load_image(str(path))
+        except ValueError:
             QMessageBox.warning(
                 self, "Ошибка", f"Не удалось загрузить {path.name}"
             )
@@ -633,7 +636,10 @@ class LabelingWindow(QMainWindow):
         mask_path = mask_dir / f"{self.current_stem}_mask.png"
         mask = None
         if mask_path.exists():
-            loaded = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            try:
+                loaded = load_image_grayscale(str(mask_path))
+            except ValueError:
+                loaded = None
             if loaded is not None and loaded.shape == image_rgb.shape[:2]:
                 mask = loaded
                 self.status_label.setText(f"📷 {path.name} (маска загружена)")
@@ -667,8 +673,9 @@ class LabelingWindow(QMainWindow):
     def _on_auto_detect(self):
         if self.current_path is None:
             return
-        image_bgr = cv2.imread(str(self.current_path))
-        if image_bgr is None:
+        try:
+            image_bgr = load_image(str(self.current_path))
+        except ValueError:
             return
 
         self.status_label.setText("Поиск чашки Петри...")
@@ -713,8 +720,9 @@ class LabelingWindow(QMainWindow):
         cx, cy = self.petri_info["center"]
         r = self.petri_info["radius"]
 
-        image_bgr = cv2.imread(str(self.current_path))
-        if image_bgr is None:
+        try:
+            image_bgr = load_image(str(self.current_path))
+        except ValueError:
             return
 
         x1 = max(0, cx - r)

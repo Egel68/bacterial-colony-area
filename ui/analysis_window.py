@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
+
+from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -84,9 +86,7 @@ class AnalysisWindow(QMainWindow):
         self._run_full_analysis()
 
     def _load_image(self):
-        self.original_image = cv2.imread(self.image_path)
-        if self.original_image is None:
-            raise ValueError(f"Не удалось загрузить изображение: {self.image_path}")
+        self.original_image = load_image(self.image_path)
         self.display_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
 
     def _init_ui(self):
