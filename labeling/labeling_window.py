@@ -1,12 +1,11 @@
 import os
 import shutil
-import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint, QSize
+from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 
 from utils.image_loader import load_image, load_image_grayscale
@@ -28,10 +27,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from analysis.colony_detector import ColonyDetector
 from analysis.geometry import PetriInfo
+from ui.controllers.labeling_controller import LabelingController
 
-SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
+SUPPORTED_EXTENSIONS = LabelingController.SUPPORTED_EXTENSIONS
 
 
 class PaintLabel(QLabel):
@@ -218,7 +217,7 @@ class LabelingWindow(QMainWindow):
         self.current_path = None
         self.mode = "source"
         self.petri_info = None
-        self.detector = ColonyDetector()
+        self.controller = LabelingController()
         self.paint_label = PaintLabel()
 
         self._init_ui()
@@ -534,30 +533,10 @@ class LabelingWindow(QMainWindow):
             self.paint_label.clear_mask()
 
     def _get_current_dir(self):
-        if self.mode == "source":
-            sub = self.session_dir / "source"
-            if sub.is_dir() and any(
-                f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
-            ):
-                return sub
-            return self.session_dir
-        sub = self.session_dir / "cropped"
-        if sub.is_dir() and any(
-            f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
-        ):
-            return sub
-        return self.session_dir
+        return self.controller.get_current_dir(self.session_dir, self.mode)
 
     def _get_mask_dir(self):
-        if self.mode == "source":
-            sub = self.session_dir / "masks"
-            if sub.is_dir():
-                return sub
-            return self.masks_dir
-        sub = self.session_dir / "cropped_masks"
-        if sub.is_dir():
-            return sub
-        return self.cropped_masks_dir
+        return self.controller.get_mask_dir(self.session_dir, self.mode)
 
     def _on_add_images(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -603,24 +582,20 @@ class LabelingWindow(QMainWindow):
     def _load_file_list(self):
         self.file_list.clear()
         d = self._get_current_dir()
-        if not d.exists():
-            return
-        for f in sorted(d.iterdir()):
-            if f.suffix.lower() in SUPPORTED_EXTENSIONS:
-                item = QListWidgetItem(f.name)
-                item.setData(Qt.ItemDataRole.UserRole, str(f))
-                self.file_list.addItem(item)
+        for f in self.controller.list_image_files(d):
+            item = QListWidgetItem(f.name)
+            item.setData(Qt.ItemDataRole.UserRole, str(f))
+            self.file_list.addItem(item)
 
     def _on_file_selected(self, item: QListWidgetItem):
         path = Path(item.data(Qt.ItemDataRole.UserRole))
         try:
-            image_bgr = load_image(str(path))
+            image_rgb = self.controller.load_image_rgb(str(path))
         except ValueError:
             QMessageBox.warning(
                 self, "Ошибка", f"Не удалось загрузить {path.name}"
             )
             return
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
         self.current_stem = path.stem
         self.current_path = path
@@ -635,17 +610,9 @@ class LabelingWindow(QMainWindow):
 
         mask_dir = self._get_mask_dir()
         mask_path = mask_dir / f"{self.current_stem}_mask.png"
-        mask = None
-        if mask_path.exists():
-            try:
-                loaded = load_image_grayscale(str(mask_path))
-            except ValueError:
-                loaded = None
-            if loaded is not None and loaded.shape == image_rgb.shape[:2]:
-                mask = loaded
-                self.status_label.setText(f"📷 {path.name} (маска загружена)")
-            else:
-                self.status_label.setText(f"📷 {path.name}")
+        mask = self.controller.load_mask(mask_path, image_rgb.shape[:2])
+        if mask is not None:
+            self.status_label.setText(f"📷 {path.name} (маска загружена)")
         else:
             self.status_label.setText(f"📷 {path.name}")
 
@@ -682,7 +649,7 @@ class LabelingWindow(QMainWindow):
             return
 
         self.status_label.setText("Поиск чашки Петри...")
-        _, info = self.detector.detect_petri_dish(image_bgr)
+        info = self.controller.detect_petri(image_bgr)
         if info is None:
             self.status_label.setText("❌ Чашка не найдена. Настройте вручную.")
             return
@@ -720,29 +687,17 @@ class LabelingWindow(QMainWindow):
             )
             return
 
-        cx, cy = self.petri_info.cx, self.petri_info.cy
-        r = self.petri_info.radius
-
         try:
             image_bgr = load_image(str(self.current_path))
         except ValueError:
             return
 
-        x1 = max(0, cx - r)
-        y1 = max(0, cy - r)
-        x2 = min(image_bgr.shape[1], cx + r)
-        y2 = min(image_bgr.shape[0], cy + r)
-        cropped = image_bgr[y1:y2, x1:x2]
-
-        circle_center = (cx - x1, cy - y1)
-        circle_mask = np.zeros(cropped.shape[:2], dtype=np.uint8)
-        cv2.circle(circle_mask, circle_center, r, 255, -1)
-        cropped[circle_mask == 0] = [0, 0, 0]
+        cropped = self.controller.crop_by_petri(image_bgr, self.petri_info)
 
         out_name = f"{self.current_stem}_cropped.png"
         self.cropped_dir.mkdir(parents=True, exist_ok=True)
         out_path = self.cropped_dir / out_name
-        cv2.imwrite(str(out_path), cropped)
+        self.controller.save_mask(cropped, out_path)
 
         self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentIndex(1)
@@ -780,12 +735,7 @@ class LabelingWindow(QMainWindow):
         if not zip_path_str:
             return
         zip_path = Path(zip_path_str)
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root_dir, dirs, files in os.walk(self.session_dir):
-                for file in files:
-                    full = Path(root_dir) / file
-                    arcname = full.relative_to(self.session_dir.parent)
-                    zf.write(str(full), str(arcname))
+        self.controller.export_session_to_zip(self.session_dir, zip_path)
         QMessageBox.information(
             self,
             "Экспорт завершён",
@@ -799,7 +749,6 @@ class LabelingWindow(QMainWindow):
             )
             return
         mask_dir = self._get_mask_dir()
-        mask_dir.mkdir(parents=True, exist_ok=True)
         mask_path = mask_dir / f"{self.current_stem}_mask.png"
         if mask_path.exists():
             answer = QMessageBox.question(
@@ -810,7 +759,7 @@ class LabelingWindow(QMainWindow):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        cv2.imwrite(str(mask_path), self.paint_label._mask)
+        self.controller.save_mask(self.paint_label._mask, mask_path)
         QMessageBox.information(
             self, "Сохранено", f"Маска сохранена:\n{mask_path.name}"
         )
