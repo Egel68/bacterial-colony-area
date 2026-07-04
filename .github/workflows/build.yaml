@@ -38,7 +38,7 @@ jobs:
       - name: Run tests (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get install -y xvfb
+          sudo apt-get install -y xvfb libegl1
           uv run python -m pytest tests/ \
             --cov=analysis --cov=utils --cov=testing \
             --cov-report=term --cov-report=xml \
