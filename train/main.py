@@ -1,15 +1,19 @@
 import argparse
 import json
+import logging
 import subprocess
 import sys
 import threading
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from .config import TrainingConfig
 from .dataset import make_datasets
 from .models import get_model, list_models
 from .train import run_training
 from .reporter import generate_report
+from utils.logging import setup_logging
 
 
 def _train(args):
@@ -28,7 +32,7 @@ def _train(args):
 
         server = threading.Thread(target=run_server, args=(cfg.dashboard_port,), daemon=True)
         server.start()
-        print(f"Dashboard: http://127.0.0.1:{cfg.dashboard_port}")
+        log.info("Dashboard: http://127.0.0.1:%d", cfg.dashboard_port)
 
         try:
             subprocess.Popen(
@@ -37,9 +41,9 @@ def _train(args):
                  "--port", "6006"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            print(f"TensorBoard: http://127.0.0.1:6006")
+            log.info("TensorBoard: http://127.0.0.1:6006")
         except Exception:
-            print("TensorBoard: не удалось запустить (возможно порт занят)")
+            log.warning("TensorBoard: не удалось запустить (возможно порт занят)")
 
         progress_callback = update
     else:
@@ -83,22 +87,23 @@ def _train(args):
 
     report_path = run_dir / "report.html"
     generate_report(summary, train_hist, val_hist, report_path)
-    print(f"Report: {report_path}")
+    log.info("Report: %s", report_path)
 
 
 def _list_models(_):
     for name in list_models():
-        print(f"  {name}")
+        log.info("  %s", name)
 
 
 def _dataset_info(_):
     cfg = TrainingConfig()
     train_ds, val_ds = make_datasets(cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment)
-    print(f"Train: {len(train_ds)} samples")
-    print(f"Val:   {len(val_ds)} samples")
+    log.info("Train: %d samples", len(train_ds))
+    log.info("Val:   %d samples", len(val_ds))
 
 
 def main():
+    setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Colony segmentation training")
     sub = parser.add_subparsers(dest="command")
 

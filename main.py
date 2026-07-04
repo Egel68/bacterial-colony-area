@@ -16,10 +16,13 @@ from PyQt6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
 from ui.styles import get_application_style
+from utils.logging import setup_logging
 
 
 def main():
     """Главная функция запуска приложения."""
+    setup_logging()
+
     # Включаем поддержку High DPI
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

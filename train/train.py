@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from pathlib import Path
 from datetime import datetime
@@ -8,6 +9,8 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from .config import TrainingConfig
+
+log = logging.getLogger(__name__)
 from .dataset import make_datasets
 from .models import get_model
 
@@ -69,12 +72,12 @@ def run_training(
     progress_callback=None,
 ) -> tuple[dict, list, list, Path]:
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    log.info("Device: %s", device)
 
     train_ds, val_ds = make_datasets(cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment)
     train_loader = DataLoader(train_ds, cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
     val_loader = DataLoader(val_ds, cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
-    print(f"Train: {len(train_ds)} | Val: {len(val_ds)}")
+    log.info("Train: %d | Val: %d", len(train_ds), len(val_ds))
 
     model = get_model(cfg.model_name)
     model = model.to(device)
@@ -129,7 +132,7 @@ def run_training(
             progress_callback(epoch, cfg.epochs, train_metrics, val_metrics, elapsed)
 
         if epoch - best_epoch > cfg.patience:
-            print(f"Early stopping at epoch {epoch}")
+            log.info("Early stopping at epoch %d", epoch)
             break
 
     writer.close()

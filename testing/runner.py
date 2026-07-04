@@ -1,9 +1,12 @@
+import logging
 from typing import Dict, List
 
 from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
 from .metrics import compute_segmentation_metrics
 from .registry import list_algorithms, get_algorithm, get_algorithm_descriptions
+
+log = logging.getLogger(__name__)
 
 SampleResult = Dict[str, float]
 AlgorithmResults = Dict[str, Dict[str, Dict[str, float]]]
@@ -53,7 +56,7 @@ def run_all(dataset: TestDataset) -> AllResults:
 
     for algo_name in list_algorithms():
         algo = get_algorithm(algo_name)
-        print(f"  Running: {algo_name}")
+        log.info("Running: %s", algo_name)
         results = run_algorithm(algo, dataset)
         all_results[algo_name] = results
 

@@ -1,8 +1,11 @@
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List
 
 from .runner import AllResults, compute_summary
+
+log = logging.getLogger(__name__)
 
 
 def _build_summary_rows(summary: List[Dict]) -> str:
@@ -215,4 +218,4 @@ def generate_report(
         chart_data=chart_data_json,
     )
     Path(output_path).write_text(html, encoding="utf-8")
-    print(f"Report: {output_path}")
+    log.info("Report: %s", output_path)

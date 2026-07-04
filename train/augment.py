@@ -1,5 +1,6 @@
 """Генерация аугментированных пар изображение-маска для обучения U-Net."""
 
+import logging
 import random
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import albumentations as A
 import cv2
 import numpy as np
 from tqdm import tqdm
+
+log = logging.getLogger(__name__)
 
 AUGMENTATIONS_PER_IMAGE = 15
 SEED = 42
@@ -55,15 +58,15 @@ def _load_image_mask(
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     mask_path = CROPPED_MASKS_DIR / f"{img_path.stem}_mask.png"
     if not mask_path.exists():
-        print(f"Пропуск {img_path.name}: нет маски {mask_path.name}")
+        log.warning("Пропуск %s: нет маски %s", img_path.name, mask_path.name)
         return None, None
     image = cv2.imread(str(img_path))
     mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
     if image is None:
-        print(f"Ошибка загрузки {img_path.name}")
+        log.error("Ошибка загрузки %s", img_path.name)
         return None, None
     if mask is None:
-        print(f"Ошибка загрузки маски {mask_path.name}")
+        log.error("Ошибка загрузки маски %s", mask_path.name)
         return None, None
     return image, mask
 
@@ -78,15 +81,16 @@ def _finalize(aug_img: np.ndarray, aug_mask: np.ndarray) -> tuple[np.ndarray, np
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     random.seed(SEED)
 
     if not CROPPED_DIR.exists():
-        print(f"Директория {CROPPED_DIR} не найдена")
+        log.warning("Директория %s не найдена", CROPPED_DIR)
         return
 
     image_paths = sorted(CROPPED_DIR.glob("*.png"))
     if not image_paths:
-        print(f"Нет PNG-изображений в {CROPPED_DIR}")
+        log.warning("Нет PNG-изображений в %s", CROPPED_DIR)
         return
 
     _ensure_dir(OUT_IMAGES_DIR)
@@ -94,9 +98,9 @@ def main() -> None:
 
     geometric, pixel = _build_transforms()
     total = len(image_paths) * AUGMENTATIONS_PER_IMAGE
-    print(
-        f"Аугментация: {len(image_paths)} исходников × {AUGMENTATIONS_PER_IMAGE} "
-        f"= {total} пар → {OUT_IMAGES_DIR.parent}"
+    log.info(
+        "Аугментация: %d исходников × %d = %d пар → %s",
+        len(image_paths), AUGMENTATIONS_PER_IMAGE, total, OUT_IMAGES_DIR.parent,
     )
 
     index = 0
@@ -119,7 +123,7 @@ def main() -> None:
             cv2.imwrite(str(OUT_MASKS_DIR / f"{stem}.png"), aug_mask)
             index += 1
 
-    print(f"Готово: {total} пар сохранено")
+    log.info("Готово: %d пар сохранено", total)
 
 
 if __name__ == "__main__":
