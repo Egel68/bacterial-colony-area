@@ -33,7 +33,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y g++ patchelf
 
       - name: Install project dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra test
 
       - name: Run tests (Linux)
         if: matrix.os == 'ubuntu-latest'
