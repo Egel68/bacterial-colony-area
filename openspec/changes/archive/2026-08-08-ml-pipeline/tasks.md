@@ -24,9 +24,9 @@
 
 ## 4. Верификация
 
-- [ ] 4.1 `openspec validate --type change ml-pipeline` → valid
-- [ ] 4.2 `openspec archive ml-pipeline --yes` → добавлено 2+ capabilities в main specs
-- [ ] 4.3 `openspec validate --all` → всё валидно
+- [x] 4.1 `openspec validate --type change ml-pipeline` → valid
+- [x] 4.2 `openspec archive ml-pipeline --yes` → добавлено 2+ capabilities в main specs
+- [x] 4.3 `openspec validate --all` → всё валидно
 
 ## 5. Итог для diff-редистрибуции
 
