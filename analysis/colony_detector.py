@@ -3,12 +3,14 @@
 Оптимизирован для темного поля (Dark Field) и изображений с бликами.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
 
+from .geometry import PetriInfo
 from .image_processor import ImageProcessor
+from .params import AnalysisParams
 
 
 class ColonyDetector:
@@ -27,8 +29,11 @@ class ColonyDetector:
 
     def detect_petri_dish(
         self, image: np.ndarray
-    ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
-        """Обнаружение чашки Петри."""
+    ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
+        """
+        Обнаружение чашки Петри.
+        Использует тот факт, что края чашки на этих фото - самые яркие объекты (блики).
+        """
         gray = self.processor.to_grayscale(image)
         h, w = gray.shape
 
@@ -79,16 +84,18 @@ class ColonyDetector:
             center, radius = best_circle
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
-            petri_info = {
-                "center": center,
-                "radius": radius,
-                "area_px": int(np.pi * radius**2),
-            }
-            return mask, petri_info
+            return mask, PetriInfo(
+                cx=center[0],
+                cy=center[1],
+                radius=radius,
+                image_shape=(h, w),
+            )
 
         return self._detect_petri_with_hough(image)
 
-    def _detect_petri_with_hough(self, image: np.ndarray) -> Tuple:
+    def _detect_petri_with_hough(
+        self, image: np.ndarray
+    ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
         gray = self.processor.to_grayscale(image)
         blurred = cv2.GaussianBlur(gray, (9, 9), 2)
         min_dim = min(image.shape[:2])
@@ -106,152 +113,94 @@ class ColonyDetector:
             circle = circles[0][0]
             center = (int(circle[0]), int(circle[1]))
             radius = int(circle[2])
+            h, w = image.shape[:2]
             mask = np.zeros(gray.shape, dtype=np.uint8)
             cv2.circle(mask, center, radius, 255, -1)
-            return mask, {
-                "center": center,
-                "radius": radius,
-                "area_px": int(np.pi * radius**2),
-            }
+            return mask, PetriInfo(
+                cx=center[0],
+                cy=center[1],
+                radius=radius,
+                image_shape=(h, w),
+            )
         return None, None
 
     def create_inner_mask(
-        self, petri_mask: np.ndarray, petri_info: Dict, margin_percent: float = 5
+        self, petri_mask: np.ndarray, petri_info: PetriInfo, margin_percent: float = 5
     ) -> np.ndarray:
-        center = petri_info["center"]
-        radius = petri_info["radius"]
         real_margin = max(margin_percent, 1.0)
-        inner_radius = int(radius * (100 - real_margin) / 100)
+        inner_radius = int(petri_info.radius * (100 - real_margin) / 100)
         inner_mask = np.zeros_like(petri_mask)
-        cv2.circle(inner_mask, center, inner_radius, 255, -1)
+        cv2.circle(inner_mask, petri_info.center, inner_radius, 255, -1)
         return inner_mask
 
     def detect_colonies(
         self,
         image: np.ndarray,
         petri_mask: np.ndarray,
-        petri_info: Dict = None,
-        sensitivity: float = 0.5,
-        min_colony_size: int = 50,
-        edge_margin_percent: float = 10,
-        contrast_level: float = 1.0,
+        params: AnalysisParams,
+        petri_info: Optional[PetriInfo] = None,
         blur_size: int = 5,
-        use_solid_fill: bool = False,
-        fill_strength: int = 15,
-        algorithm_mode: int = 2,  # 0-Оригинальный, 1-Улучшенный, 2-Продвинутый (с фильтрацией)
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> tuple[np.ndarray, Dict]:
 
-        # 1. Формируем маску рабочей зоны (ROI)
         if petri_info:
             roi_mask = self.create_inner_mask(
-                petri_mask, petri_info, edge_margin_percent
+                petri_mask, petri_info, params.margin_percent
             )
         else:
             roi_mask = petri_mask
 
-        # 2. Выделяем нужный канал и улучшаем контраст
         channel = self.processor.extract_green_channel(image)
-        clip_limit = 2.0 * contrast_level
+
+        clip_limit = 2.0 * params.contrast
         enhanced = self.processor.apply_clahe(
             channel, clip_limit=clip_limit, grid_size=8
         )
 
-        k_size = max(3, blur_size if blur_size % 2 == 1 else blur_size + 1)
+        k_size = blur_size if blur_size % 2 == 1 else blur_size + 1
+        k_size = max(3, k_size)
         denoised = cv2.medianBlur(enhanced, k_size)
 
-        # 3. МОРФОЛОГИЧЕСКИЙ TOP-HAT (удаляет неравномерный фон)
-        tophat_kernel_size = 51
-        bg_kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (tophat_kernel_size, tophat_kernel_size)
-        )
-        tophat = cv2.morphologyEx(denoised, cv2.MORPH_TOPHAT, bg_kernel)
+        bg = cv2.GaussianBlur(denoised, (51, 51), 0)
+        diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
+        masked_diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
 
-        masked_tophat = cv2.bitwise_and(tophat, tophat, mask=roi_mask)
-
-        # 4. Адаптивная бинаризация
-        valid_pixels = masked_tophat[roi_mask > 0]
+        valid_pixels = masked_diff[roi_mask > 0]
         if len(valid_pixels) == 0:
             return np.zeros_like(channel), {}
 
         mean_val = np.mean(valid_pixels)
         std_val = np.std(valid_pixels)
 
-        if algorithm_mode == 0:
-            # Оригинальный подход: Слишком резкая зависимость
-            k = 4.0 - (sensitivity * 3.5)
-            thresh_val = mean_val + k * std_val
-        else:
-            # Улучшенный подход (ColTapp, OpenCFU): Комбинация Otsu и статистики
-            otsu_thresh = cv2.threshold(masked_tophat, 0, 255, cv2.THRESH_OTSU)[0]
-            median_val = np.median(valid_pixels)
-            stat_thresh = median_val + (3.0 - sensitivity * 2.5) * std_val
-            # Взвешиваем пороги для максимальной стабильности
-            thresh_val = 0.7 * otsu_thresh + 0.3 * stat_thresh
+        k = 3.0 - (params.sensitivity * 2.5)
+        thresh_val = mean_val + k * std_val
+        thresh_val = max(mean_val + 5, min(thresh_val, 254))
 
-        thresh_val = np.clip(thresh_val, 5, 250)
+        _, binary = cv2.threshold(masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY)
 
-        _, binary = cv2.threshold(
-            masked_tophat, int(thresh_val), 255, cv2.THRESH_BINARY
+        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        clean_binary = cv2.morphologyEx(
+            binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
         )
 
-        # Очистка базового шума
-        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        opening = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_morph, iterations=1)
-
-        # 5. ФОРМИРОВАНИЕ ГРАНИЦ И РАЗДЕЛЕНИЕ СЛИПШИХСЯ КОЛОНИЙ
-        if use_solid_fill:
-            fill_k_size = max(3, fill_strength)
+        if params.solid_fill:
+            fill_k_size = max(3, params.fill_strength)
             fill_kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
             )
-            clean_binary = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, fill_kernel)
+            clean_binary = cv2.morphologyEx(clean_binary, cv2.MORPH_CLOSE, fill_kernel)
+
             contours = self._find_contours(clean_binary)
             cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
         else:
-            # WATERSHED (Водораздел)
-            sure_bg = cv2.dilate(opening, kernel_morph, iterations=2)
-            dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
-
-            if algorithm_mode == 0:
-                # Оригинальный метод
-                dt_multiplier = 0.6 - (sensitivity * 0.4)
-            else:
-                # Метод Vincent & Soille (1991): Жесткие границы диапазона
-                dt_multiplier = 0.4 - (sensitivity * 0.2)
-                dt_multiplier = max(0.15, min(0.45, dt_multiplier))
-
-            _, sure_fg = cv2.threshold(
-                dist_transform, dt_multiplier * dist_transform.max(), 255, 0
-            )
-            sure_fg = np.uint8(sure_fg)
-
-            unknown = cv2.subtract(sure_bg, sure_fg)
-            _, markers = cv2.connectedComponents(sure_fg)
-            markers = markers + 1
-            markers[unknown == 255] = 0
-
-            img_for_watershed = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            markers = cv2.watershed(img_for_watershed, markers)
-
-            clean_binary = np.zeros_like(opening)
-            clean_binary[markers > 1] = 255
-
-        clean_binary = cv2.bitwise_and(clean_binary, clean_binary, mask=roi_mask)
-
-        # 6. Фильтрация
-        if algorithm_mode < 2:
-            # Обычная фильтрация только по минимальному размеру
-            final_mask = self._filter_components(clean_binary, min_size=min_colony_size)
-        else:
-            # Продвинутая фильтрация (с учетом геометрической формы - extent & circularity)
-            final_mask = self._filter_components_advanced(
-                clean_binary, min_size=min_colony_size
+            clean_binary = cv2.morphologyEx(
+                clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
             )
 
-        debug_images = {
-            "preprocessed": masked_tophat,
-            "binary": final_mask,
-        }
+        final_mask = self._filter_components(
+            clean_binary, min_size=params.min_colony_size
+        )
+
+        debug_images: Dict = {"preprocessed": masked_diff, "binary": clean_binary}
 
         return final_mask, debug_images
 
@@ -264,37 +213,6 @@ class ColonyDetector:
             area = stats[i, cv2.CC_STAT_AREA]
             if area >= min_size:
                 filtered_mask[labels == i] = 255
-        return filtered_mask
-
-    def _filter_components_advanced(
-        self, mask: np.ndarray, min_size: int
-    ) -> np.ndarray:
-        """
-        Геометрическая фильтрация (Brugger et al. / OpenCFU).
-        Удаляет вытянутые царапины, артефакты краев чашки и нетипичный мусор.
-        """
-        contours = self._find_contours(mask)
-        filtered_mask = np.zeros_like(mask)
-
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < min_size:
-                continue
-
-            # 1. Extent (площадь / площадь ограничивающего прямоугольника)
-            x, y, w, h = cv2.boundingRect(cnt)
-            bounding_box_area = w * h
-            extent = area / float(bounding_box_area) if bounding_box_area > 0 else 0
-
-            # 2. Circularity (Круглость)
-            perimeter = cv2.arcLength(cnt, True)
-            circularity = 4 * np.pi * area / (perimeter**2) if perimeter > 0 else 0
-
-            # Колонии могут быть слипшимися (что снижает круглость),
-            # но они почти никогда не имеют extent < 0.25 и circularity < 0.2
-            if extent >= 0.3 and circularity >= 0.25:
-                cv2.drawContours(filtered_mask, [cnt], -1, 255, thickness=cv2.FILLED)
-
         return filtered_mask
 
     def count_colonies(self, colony_mask: np.ndarray) -> int:

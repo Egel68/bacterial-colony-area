@@ -3,11 +3,9 @@
 Содержит элементы для выбора файла и запуска анализа.
 """
 
-import os
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -17,20 +15,17 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
-    QSpacerItem,
     QVBoxLayout,
     QWidget,
 )
 
 from .analysis_window import AnalysisWindow
+from labeling import LabelingWindow
+from utils.image_loader import SUPPORTED_EXTENSIONS
 
 
 class MainWindow(QMainWindow):
     """Главное окно приложения для выбора изображения."""
-
-    # Поддерживаемые форматы изображений
-    SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 
     def __init__(self):
         super().__init__()
@@ -130,7 +125,7 @@ class MainWindow(QMainWindow):
 
     def _create_format_info(self, layout: QVBoxLayout):
         """Создание информации о поддерживаемых форматах."""
-        formats_text = ", ".join(sorted(self.SUPPORTED_FORMATS))
+        formats_text = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         info_label = QLabel(f"ℹ️ Поддерживаемые форматы: {formats_text}")
         info_label.setObjectName("info")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -157,6 +152,33 @@ class MainWindow(QMainWindow):
 
         button_layout.addStretch()
         layout.addLayout(button_layout)
+
+        # Кнопка разметки тестовых изображений
+        label_layout = QHBoxLayout()
+        label_layout.addStretch()
+        self.label_button = QPushButton("✏️ Разметка тестовых изображений")
+        self.label_button.setObjectName("secondary")
+        self.label_button.setMinimumSize(260, 40)
+        self.label_button.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                border-radius: 10px;
+            }
+        """)
+        self.label_button.clicked.connect(self._open_labeling)
+        label_layout.addWidget(self.label_button)
+        label_layout.addStretch()
+        layout.addLayout(label_layout)
+
+    def _open_labeling(self):
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите или создайте папку для сессии разметки",
+            str(Path.home() / "BacteriaLabeling"),
+        )
+        if folder:
+            self.labeling_window = LabelingWindow(Path(folder), self)
+            self.labeling_window.show()
 
     def _open_file_dialog(self):
         """Открытие диалога выбора файла."""
@@ -191,7 +213,7 @@ class MainWindow(QMainWindow):
             return False
 
         # Проверяем расширение
-        if path.suffix.lower() not in self.SUPPORTED_FORMATS:
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             return False
 
         return True
@@ -203,7 +225,7 @@ class MainWindow(QMainWindow):
             return
 
         if not self._validate_file(self.selected_file_path):
-            formats = ", ".join(sorted(self.SUPPORTED_FORMATS))
+            formats = ", ".join(sorted(SUPPORTED_EXTENSIONS))
             self._show_error(
                 "Неверный формат файла",
                 f"Выбранный файл имеет неподдерживаемый формат.\n\n"

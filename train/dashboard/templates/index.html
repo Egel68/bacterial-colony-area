@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Training Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 1.5rem; }
+h1 { margin-bottom: 1rem; font-size: 1.5rem; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.card { background: #16213e; border-radius: 10px; padding: 1rem; }
+.card h2 { font-size: 0.9rem; color: #a0a0c0; margin-bottom: 0.5rem; }
+.chart-wrap { position: relative; height: 200px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 0.3rem 0.6rem; text-align: left; border-bottom: 1px solid #2a2a4e; font-size: 0.85rem; }
+th { color: #a0a0c0; font-weight: 600; }
+#status { margin-bottom: 1rem; font-size: 0.9rem; color: #7ec8e3; }
+img.sample { max-width: 100%; border-radius: 6px; display: none; }
+</style>
+</head>
+<body>
+<h1>🧫 Training Dashboard</h1>
+<div id="status">Waiting for training connection...</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Loss</h2>
+    <div class="chart-wrap"><canvas id="chart-loss"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>IoU</h2>
+    <div class="chart-wrap"><canvas id="chart-iou"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Dice</h2>
+    <div class="chart-wrap"><canvas id="chart-dice"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Precision / Recall</h2>
+    <div class="chart-wrap"><canvas id="chart-pr"></canvas></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Metrics (last epoch)</h2>
+  <table>
+    <thead><tr><th>Split</th><th>Loss</th><th>IoU</th><th>Dice</th><th>Precision</th><th>Recall</th></tr></thead>
+    <tbody id="metrics-table"></tbody>
+  </table>
+</div>
+
+<script>
+const METRICS = ['loss', 'iou', 'dice'];
+const charts = {};
+METRICS.forEach(m => {
+  const ctx = document.getElementById(`chart-${m}`).getContext('2d');
+  charts[m] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'train_' + m, data: [], borderColor: '#4ade80', backgroundColor: 'transparent', tension: 0.3 },
+        { label: 'val_' + m, data: [], borderColor: '#f472b6', backgroundColor: 'transparent', tension: 0.3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e0e0e0', boxWidth: 10, padding: 8 } } },
+      scales: { x: { ticks: { color: '#a0a0c0', maxTicksLimit: 10 } }, y: { ticks: { color: '#a0a0c0' } } }
+    }
+  });
+});
+
+// Precision/Recall chart
+const ctxPr = document.getElementById('chart-pr').getContext('2d');
+charts['pr'] = new Chart(ctxPr, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'val_precision', data: [], borderColor: '#fbbf24', backgroundColor: 'transparent', tension: 0.3 },
+      { label: 'val_recall', data: [], borderColor: '#60a5fa', backgroundColor: 'transparent', tension: 0.3 },
+    ]
+  },
+  options: charts[METRICS[0]].options
+});
+
+function addEpoch(data) {
+  const ep = data.epoch;
+  METRICS.forEach(m => {
+    charts[m].data.labels.push(ep);
+    charts[m].data.datasets[0].data.push(data.train[m] ?? 0);
+    charts[m].data.datasets[1].data.push(data.val[m] ?? 0);
+    charts[m].update('none');
+  });
+  charts['pr'].data.labels.push(ep);
+  charts['pr'].data.datasets[0].data.push(data.val.precision ?? 0);
+  charts['pr'].data.datasets[1].data.push(data.val.recall ?? 0);
+  charts['pr'].update('none');
+}
+
+function updateTable(data) {
+  const t = document.getElementById('metrics-table');
+  t.innerHTML = `<tr><td>train</td><td>${data.train.loss?.toFixed(4)}</td><td>${data.train.iou?.toFixed(4)}</td><td>${data.train.dice?.toFixed(4)}</td><td>${data.train.precision?.toFixed(4)}</td><td>${data.train.recall?.toFixed(4)}</td></tr><tr><td>val</td><td>${data.val.loss?.toFixed(4)}</td><td>${data.val.iou?.toFixed(4)}</td><td>${data.val.dice?.toFixed(4)}</td><td>${data.val.precision?.toFixed(4)}</td><td>${data.val.recall?.toFixed(4)}</td></tr>`;
+}
+
+// WebSocket
+let ws = new WebSocket(`ws://${location.host}/ws`);
+ws.onmessage = e => {
+  const data = JSON.parse(e.data);
+  document.getElementById('status').textContent = `Epoch ${data.epoch} / ${data.total} — ${data.elapsed}s`;
+  addEpoch(data);
+  updateTable(data);
+};
+ws.onclose = () => setTimeout(() => {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+}, 2000);
+
+// Fetch history on reconnect
+fetch('/history').then(r => r.json()).then(h => {
+  for (let i = 0; i < h.epochs.length; i++) {
+    addEpoch({ epoch: h.epochs[i], train: h.train[i], val: h.val[i] });
+    updateTable({ train: h.train[i], val: h.val[i] });
+  }
+});
+</script>
+</body>
+</html>

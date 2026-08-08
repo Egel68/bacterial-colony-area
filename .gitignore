@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+.venv-dev/
+
+# Generated training data
+train/data/
+train/runs/**/*.pt
+train/runs/**/*.onnx.data
+train/runs/**/tensorboard/
+train/runs/**/report.html
+
+# Test reports
+test_report.html
+coverage/
+.coverage
+coverage.xml
+.coverage.*
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
+
+# MCP
+.mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Opencode
+.opencode/node_modules/
+opencode.json
+
+# Docs
+docs/
