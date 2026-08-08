@@ -94,7 +94,5 @@ class LabelingController:
         if not directory.exists():
             return []
         return sorted(
-            f
-            for f in directory.iterdir()
-            if f.suffix.lower() in SUPPORTED_EXTENSIONS
+            f for f in directory.iterdir() if f.suffix.lower() in SUPPORTED_EXTENSIONS
         )

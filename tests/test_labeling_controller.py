@@ -81,7 +81,9 @@ class TestCropByPetri:
         assert cropped.shape[0] <= 2 * info.radius + 1
         assert cropped.shape[1] <= 2 * info.radius + 1
 
-    def test_crop_center_preserved(self, controller, synthetic_colony_image, petri_info):
+    def test_crop_center_preserved(
+        self, controller, synthetic_colony_image, petri_info
+    ):
         cropped = controller.crop_by_petri(synthetic_colony_image, petri_info)
         center = cropped[petri_info.radius, petri_info.radius]
         assert np.all(center == 150)

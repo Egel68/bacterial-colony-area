@@ -37,7 +37,7 @@ jobs:
 
       - name: Lint and format check
         run: |
-          uv pip install ruff
+          uv pip install ruff==0.15.20
           uv run ruff check .
           uv run ruff format --check .
 

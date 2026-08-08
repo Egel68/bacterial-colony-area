@@ -103,7 +103,20 @@ class TestGenerateReport:
     def test_report_created(self, tmp_path):
         all_results = {
             "ClassicDefault": {
-                "sample1": {"source": {"iou": 0.9, "dice": 0.95, "f1": 0.95, "precision": 1.0, "recall": 0.9, "accuracy": 0.99, "tp": 90, "fp": 0, "fn": 10, "tn": 900}}
+                "sample1": {
+                    "source": {
+                        "iou": 0.9,
+                        "dice": 0.95,
+                        "f1": 0.95,
+                        "precision": 1.0,
+                        "recall": 0.9,
+                        "accuracy": 0.99,
+                        "tp": 90,
+                        "fp": 0,
+                        "fn": 10,
+                        "tn": 900,
+                    }
+                }
             }
         }
         out = str(tmp_path / "report.html")

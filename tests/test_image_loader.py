@@ -8,9 +8,7 @@ from utils.image_loader import SUPPORTED_EXTENSIONS, load_image, load_image_gray
 @pytest.fixture
 def padded_width_png(tmp_path):
     """PNG с шириной 870px: bytesPerLine=2612 > 3×870=2610 (Qt row-padding)."""
-    image = np.random.default_rng(42).integers(
-        0, 256, (40, 870, 3), dtype=np.uint8
-    )
+    image = np.random.default_rng(42).integers(0, 256, (40, 870, 3), dtype=np.uint8)
     path = tmp_path / "padded.png"
     cv2.imwrite(str(path), image)
     return path, image

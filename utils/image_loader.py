@@ -20,7 +20,7 @@ def _load_image_pixmap(path: str) -> np.ndarray | None:
         ptr = qimage.bits()
         ptr.setsize(qimage.sizeInBytes())
         raw = np.frombuffer(ptr, dtype=np.uint8).reshape((h, bpl))
-        rgb = raw[:, :3 * w].reshape((h, w, 3))
+        rgb = raw[:, : 3 * w].reshape((h, w, 3))
         return rgb[:, :, ::-1].copy()
     except Exception:
         return None
