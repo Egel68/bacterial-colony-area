@@ -40,3 +40,6 @@ Thumbs.db
 # Opencode
 .opencode/node_modules/
 opencode.json
+
+# Docs
+docs/
