@@ -1,34 +1,33 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from nuitka_flags import build_flags
 
-EXCLUDE = {
-    ".venv",
-    ".venv-dev",
-    "__pycache__",
-    "bacterial_colony_analyzer.egg-info",
-    ".git",
-    ".github",
-    "scripts",
-    "test_images",
-    "test_data",
-    "train",
-}
+MAX_JOBS = 8
 
-packages = sorted(
-    e.name
-    for e in ROOT.iterdir()
-    if e.is_dir()
-    and e.name not in EXCLUDE
-    and not e.name.startswith(".")
-    and (e / "__init__.py").exists()
-)
 
-flags = [f"--include-package={p}" for p in packages]
-flags.append("--enable-plugin=pyqt6")
+def compute_jobs() -> int:
+    """Вычисляет число параллельных задач: env NUITKA_JOBS или max(1, min(ядра, 8))."""
+    env_value = os.environ.get("NUITKA_JOBS")
+    if env_value is not None:
+        try:
+            return max(1, int(env_value))
+        except ValueError:
+            raise SystemExit(
+                f"NUITKA_JOBS должен быть целым числом, получено: {env_value!r}"
+            )
+    available = os.cpu_count() or 1
+    return max(1, min(available, MAX_JOBS))
 
-cmd = [sys.executable, "-m", "nuitka", *flags, *sys.argv[1:]]
-print(f"Running: {' '.join(cmd)}")
-subprocess.check_call(cmd)
+
+if __name__ == "__main__":
+    ROOT = Path(__file__).resolve().parent.parent
+
+    flags = build_flags(ROOT)
+    flags.append(f"--jobs={compute_jobs()}")
+
+    cmd = [sys.executable, "-m", "nuitka", *flags, *sys.argv[1:]]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.check_call(cmd)

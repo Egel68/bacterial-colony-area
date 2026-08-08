@@ -15,15 +15,21 @@ EXCLUDE = {
     "train",
 }
 
-packages = sorted(
-    e.name
-    for e in ROOT.iterdir()
-    if e.is_dir()
-    and e.name not in EXCLUDE
-    and not e.name.startswith(".")
-    and (e / "__init__.py").exists()
-)
 
-flags = [f"--include-package={p}" for p in packages]
-flags.append("--enable-plugin=pyqt6")
-print(" ".join(flags))
+def build_flags(root: Path) -> list[str]:
+    """Формирует флаги --include-package и --enable-plugin=pyqt6 (единый источник)."""
+    packages = sorted(
+        e.name
+        for e in root.iterdir()
+        if e.is_dir()
+        and e.name not in EXCLUDE
+        and not e.name.startswith(".")
+        and (e / "__init__.py").exists()
+    )
+    flags = [f"--include-package={p}" for p in packages]
+    flags.append("--enable-plugin=pyqt6")
+    return flags
+
+
+if __name__ == "__main__":
+    print(" ".join(build_flags(ROOT)))

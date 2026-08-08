@@ -75,7 +75,6 @@ jobs:
             --assume-yes-for-downloads `
             --windows-console-mode=disable `
             --windows-icon-from-ico=icon.ico `
-            --jobs=2 `
             --output-filename=BacteriaAnalyzer.exe `
             main.py
 
