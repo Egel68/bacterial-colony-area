@@ -1,10 +1,14 @@
 name: Build BacteriaAnalyzer
 
 on:
+  pull_request:
+    branches:
+      - develop
   push:
     branches:
       - develop
       - main
+      - feature/*
 
 jobs:
   build-executable:
@@ -17,49 +21,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      - name: Install dependencies
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y g++ patchelf
+
+      - name: Install project dependencies
+        run: uv sync --extra test
+
+      - name: Lint and format check
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          uv pip install ruff==0.15.20
+          uv run ruff check .
+          uv run ruff format --check .
 
-      # Шаг сборки для Linux (разделитель путей :)
+      - name: Run tests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install -y libegl1
+          uv run python -m pytest tests/ \
+            --cov=analysis --cov=utils --cov=testing \
+            --cov-report=term --cov-report=xml \
+            -v --tb=short -m "not slow and not gui"
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: uv run python -m pytest tests/ -v --tb=short -m "not slow and not gui"
+
+      - name: Install Nuitka
+        run: uv pip install nuitka zstandard
+
       - name: Build executable (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          pyinstaller \
-            --onefile \
-            --windowed \
-            --name=BacteriaAnalyzer \
-            --icon=icon.ico \
-            --add-data="ui:ui" \
-            --add-data="analysis:analysis" \
-            --add-data="utils:utils" \
-            --hidden-import=PyQt6.sip \
-            --hidden-import=cv2 \
-            --hidden-import=numpy \
+          uv run python scripts/nuitka_build.py \
+            --standalone --onefile \
+            --output-filename=BacteriaAnalyzer \
             main.py
 
-      # Шаг сборки для Windows (разделитель путей ;)
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          pyinstaller `
-            --onefile `
-            --windowed `
-            --name=BacteriaAnalyzer `
-            --icon=icon.ico `
-            --add-data="ui;ui" `
-            --add-data="analysis;analysis" `
-            --add-data="utils;utils" `
-            --hidden-import=PyQt6.sip `
-            --hidden-import=cv2 `
-            --hidden-import=numpy `
+          uv run python scripts/nuitka_build.py `
+            --standalone --onefile `
+            --msvc=latest `
+            --assume-yes-for-downloads `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=icon.ico `
+            --output-filename=BacteriaAnalyzer.exe `
             main.py
 
       - name: Upload artifact (Linux)
@@ -67,11 +83,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BacteriaAnalyzer-Linux
-          path: dist/BacteriaAnalyzer
+          path: BacteriaAnalyzer
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: BacteriaAnalyzer-Windows
-          path: dist/BacteriaAnalyzer.exe
+          path: BacteriaAnalyzer.exe
