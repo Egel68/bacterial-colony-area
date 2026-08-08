@@ -19,17 +19,21 @@ TBD - created by archiving change labeling-and-testing. Update Purpose after arc
 - **КОГДА** директория не существует
 - **ТОГДА** `list_image_files` SHALL вернуть пустой список
 
-### Requirement: Session directory selection
+### Requirement: Session directory structure
 
-Для режима «исходники» (`source`) система SHALL выбирать поддиректорию `source/` как рабочую, если там есть хотя бы один файл поддерживаемого формата; иначе — корень сессии. Для режима «обрезки» (`cropped`) система SHALL выбирать `cropped/` аналогичным образом. Для масок система SHALL выбирать `masks/` (для source) или `cropped_masks/` (для cropped), создавая путь при необходимости.
+Для режима «исходники» (`source`) система SHALL использовать поддиректорию `source/` сессии как рабочую директорию. Для режима «обрезки» (`cropped`) система SHALL использовать поддиректорию `cropped/`. Если соответствующая поддиректория отсутствует, система SHALL создать её перед использованием. Для масок система SHALL использовать `masks/` (для source) или `cropped_masks/` (для cropped), создавая директорию при необходимости.
 
-#### Scenario: Source dir has images
-- **КОГДА** в сессии есть `source/` с изображениями
-- **ТОГДА** `get_current_dir(session, "source")` SHALL вернуть `source/`
+#### Scenario: Source dir as working directory
+- **КОГДА** пользователь находится в режиме «исходники»
+- **ТОГДА** `get_current_dir(session, "source")` SHALL вернуть `source/` (даже если в ней нет файлов)
 
-#### Scenario: Empty source falls back to session root
-- **КОГДА** `source/` пуст или отсутствует
-- **ТОГДА** `get_current_dir(session, "source")` SHALL вернуть корень сессии
+#### Scenario: Cropped dir as working directory
+- **КОГДА** пользователь находится в режиме «обрезки»
+- **ТОГДА** `get_current_dir(session, "cropped")` SHALL вернуть `cropped/`
+
+#### Scenario: Missing source dir auto-created
+- **КОГДА** в сессии отсутствует `source/`
+- **ТОГДА** система SHALL создать `source/` перед загрузкой списка файлов и вернуть её
 
 #### Scenario: Mask directory selection
 - **КОГДА** запрашивается маска для source
