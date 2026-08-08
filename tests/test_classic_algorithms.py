@@ -8,6 +8,7 @@ from testing.classic_algorithms import (
     ClassicSolidFill,
     ClassicLowSensitivity,
 )
+from testing.dashboard import generate_report
 from testing.dataset import TestDataset
 from testing.runner import run_algorithm, _mean_metrics
 
@@ -34,6 +35,29 @@ class TestAlgorithmsRun:
         assert mask.ndim == 2
         assert mask.dtype == np.uint8
         assert mask.shape[:2] == image.shape[:2]
+
+    @pytest.mark.parametrize(
+        "algo_cls",
+        [
+            ClassicDefault,
+            ClassicHighSensitivity,
+            ClassicSolidFill,
+            ClassicLowSensitivity,
+        ],
+    )
+    def test_each_returns_cropped_mask(self, algo_cls):
+        dataset = TestDataset()
+        if len(dataset) == 0:
+            pytest.skip("no test dataset found")
+        sample = dataset[0]
+        if sample.cropped_image is None or sample.cropped_mask is None:
+            pytest.skip("no cropped pair found")
+        algo = algo_cls()
+        mask = algo.detect(sample.cropped_image, is_cropped=True)
+        assert isinstance(mask, np.ndarray)
+        assert mask.ndim == 2
+        assert mask.dtype == np.uint8
+        assert mask.shape[:2] == sample.cropped_image.shape[:2]
 
 
 @pytest.mark.slow
@@ -73,3 +97,17 @@ class TestMeanMetrics:
         result = _mean_metrics(metrics)
         assert result["mean_iou"] == pytest.approx(0.6)
         assert result["std_iou"] == pytest.approx(0.1)
+
+
+class TestGenerateReport:
+    def test_report_created(self, tmp_path):
+        all_results = {
+            "ClassicDefault": {
+                "sample1": {"source": {"iou": 0.9, "dice": 0.95, "f1": 0.95, "precision": 1.0, "recall": 0.9, "accuracy": 0.99, "tp": 90, "fp": 0, "fn": 10, "tn": 900}}
+            }
+        }
+        out = str(tmp_path / "report.html")
+        generate_report(all_results, output_path=out)
+        text = (tmp_path / "report.html").read_text(encoding="utf-8")
+        assert "ClassicDefault" in text
+        assert "0.9000" in text

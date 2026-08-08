@@ -8,13 +8,11 @@ import numpy as np
 
 from analysis.colony_detector import ColonyDetector
 from analysis.geometry import PetriInfo
-from utils.image_loader import load_image, load_image_grayscale
+from utils.image_loader import SUPPORTED_EXTENSIONS, load_image, load_image_grayscale
 
 
 class LabelingController:
     """Бизнес-логика разметки без зависимостей от Qt."""
-
-    SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 
     def __init__(self, detector: Optional[ColonyDetector] = None):
         self._detector = detector or ColonyDetector()
@@ -74,13 +72,13 @@ class LabelingController:
         if mode == "source":
             sub = session_dir / "source"
             if sub.is_dir() and any(
-                f.suffix.lower() in self.SUPPORTED_EXTENSIONS for f in sub.iterdir()
+                f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
             ):
                 return sub
             return session_dir
         sub = session_dir / "cropped"
         if sub.is_dir() and any(
-            f.suffix.lower() in self.SUPPORTED_EXTENSIONS for f in sub.iterdir()
+            f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
         ):
             return sub
         return session_dir
@@ -98,5 +96,5 @@ class LabelingController:
         return sorted(
             f
             for f in directory.iterdir()
-            if f.suffix.lower() in self.SUPPORTED_EXTENSIONS
+            if f.suffix.lower() in SUPPORTED_EXTENSIONS
         )

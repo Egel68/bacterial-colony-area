@@ -21,13 +21,11 @@ from PyQt6.QtWidgets import (
 
 from .analysis_window import AnalysisWindow
 from labeling import LabelingWindow
+from utils.image_loader import SUPPORTED_EXTENSIONS
 
 
 class MainWindow(QMainWindow):
     """Главное окно приложения для выбора изображения."""
-
-    # Поддерживаемые форматы изображений
-    SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 
     def __init__(self):
         super().__init__()
@@ -127,7 +125,7 @@ class MainWindow(QMainWindow):
 
     def _create_format_info(self, layout: QVBoxLayout):
         """Создание информации о поддерживаемых форматах."""
-        formats_text = ", ".join(sorted(self.SUPPORTED_FORMATS))
+        formats_text = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         info_label = QLabel(f"ℹ️ Поддерживаемые форматы: {formats_text}")
         info_label.setObjectName("info")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -215,7 +213,7 @@ class MainWindow(QMainWindow):
             return False
 
         # Проверяем расширение
-        if path.suffix.lower() not in self.SUPPORTED_FORMATS:
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             return False
 
         return True
@@ -227,7 +225,7 @@ class MainWindow(QMainWindow):
             return
 
         if not self._validate_file(self.selected_file_path):
-            formats = ", ".join(sorted(self.SUPPORTED_FORMATS))
+            formats = ", ".join(sorted(SUPPORTED_EXTENSIONS))
             self._show_error(
                 "Неверный формат файла",
                 f"Выбранный файл имеет неподдерживаемый формат.\n\n"

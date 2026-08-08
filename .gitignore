@@ -27,6 +27,16 @@ coverage.xml
 .vscode/
 .idea/
 
+# Env
+.env
+
+# MCP
+.mcp/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Opencode
+.opencode/node_modules/
+opencode.json

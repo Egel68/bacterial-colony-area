@@ -77,6 +77,25 @@ class TestDetectPetriDish:
         assert info is not None
         assert info.radius > 50
 
+    def test_returns_none_for_blank_image(self, blank_image_bgr):
+        _, info = DETECTOR.detect_petri_dish(blank_image_bgr)
+        assert info is None
+
+
+class TestDetectColoniesEmpty:
+    def test_empty_roi_returns_zero_mask(self, blank_image_bgr):
+        h, w = blank_image_bgr.shape[:2]
+        petri_mask = np.zeros((h, w), dtype=np.uint8)
+        params = AnalysisParams(sensitivity=0.5, min_colony_size=10)
+        colony_mask, debug = DETECTOR.detect_colonies(
+            blank_image_bgr,
+            petri_mask,
+            params=params,
+            petri_info=None,
+        )
+        assert colony_mask.sum() == 0
+        assert debug == {}
+
 
 class TestDetectColonies:
     def test_detects_colony_on_synthetic(self, synthetic_colony_image):

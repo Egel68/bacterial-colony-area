@@ -7,6 +7,8 @@ import numpy as np
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 
+from analysis.geometry import PetriInfo
+from ui.controllers.labeling_controller import LabelingController
 from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -25,11 +27,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from analysis.geometry import PetriInfo
-from ui.controllers.labeling_controller import LabelingController
-
-SUPPORTED_EXTENSIONS = LabelingController.SUPPORTED_EXTENSIONS
 
 
 class PaintLabel(QLabel):
@@ -636,6 +633,9 @@ class LabelingWindow(QMainWindow):
         try:
             image_bgr = load_image(str(self.current_path))
         except ValueError:
+            QMessageBox.warning(
+                self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
+            )
             return
 
         self.status_label.setText("Поиск чашки Петри...")
@@ -676,6 +676,9 @@ class LabelingWindow(QMainWindow):
         try:
             image_bgr = load_image(str(self.current_path))
         except ValueError:
+            QMessageBox.warning(
+                self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
+            )
             return
 
         cropped = self.controller.crop_by_petri(image_bgr, self.petri_info)
