@@ -153,9 +153,7 @@ class LabelingSessionDialog(QDialog):
         path = Path(item.data(Qt.ItemDataRole.UserRole))
         name = item.text()
         if not path.is_dir():
-            QMessageBox.warning(
-                self, "Сессия недоступна", f"Папка не найдена:\n{path}"
-            )
+            QMessageBox.warning(self, "Сессия недоступна", f"Папка не найдена:\n{path}")
             self.manager.remove(path)
             self._reload_recents()
             return

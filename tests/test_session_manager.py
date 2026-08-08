@@ -85,7 +85,7 @@ class TestSessionManager:
 
     def test_session_path_raises_on_empty_name(self, manager):
         with pytest.raises(ValueError):
-            manager.session_path('<>:')
+            manager.session_path("<>:")
 
     def test_add_and_list_order(self, manager, tmp_path):
         s1, s2 = tmp_path / "s1", tmp_path / "s2"
