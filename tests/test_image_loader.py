@@ -73,6 +73,7 @@ class TestLoadImageRowPadding:
         assert img.min() >= 0 and img.max() <= 255
 
 
+@pytest.mark.gui
 class TestLoadImageErrorMessage:
     def test_message_mentions_both_loaders(self):
         with pytest.raises(ValueError) as excinfo:
