@@ -33,7 +33,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y g++ patchelf
 
       - name: Install project dependencies
-        run: uv sync --extra test
+        run: uv sync --extra dev
 
       - name: Lint and format check
         run: |
@@ -54,13 +54,26 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: uv run python -m pytest tests/ -v --tb=short -m "not slow and not gui"
 
-      - name: Install Nuitka
-        run: uv pip install nuitka zstandard
+      - name: Create clean runtime environment for build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          rm -rf .venv-build
+          UV_PROJECT_ENVIRONMENT=.venv-build uv sync
+          uv pip install --python .venv-build nuitka zstandard
+
+      - name: Create clean runtime environment for build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (Test-Path .venv-build) { Remove-Item -Recurse -Force .venv-build }
+          $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
+          uv sync
+          uv pip install --python .venv-build nuitka zstandard
 
       - name: Build executable (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          uv run python scripts/nuitka_build.py \
+          UV_PROJECT_ENVIRONMENT=.venv-build uv run --no-sync python scripts/nuitka_build.py \
             --standalone --onefile \
             --output-filename=BacteriaAnalyzer \
             main.py
@@ -69,7 +82,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          uv run python scripts/nuitka_build.py `
+          $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
+          uv run --no-sync python scripts/nuitka_build.py `
             --standalone --onefile `
             --msvc=latest `
             --assume-yes-for-downloads `

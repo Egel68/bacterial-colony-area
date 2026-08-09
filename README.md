@@ -22,13 +22,16 @@
 Требуется Python 3.13+ и [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Лёгкое окружение (~600 МБ) — для запуска и тестирования
+# Runtime-окружение (~475 МБ) — для запуска приложения
 uv sync
 uv run bacteria-analyzer
 
-# Полное окружение (~5 ГБ) — для обучения нейросети
+# Dev-окружение без ML (~530 МБ) — для тестирования и сборки бинарника
 UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev
-source .venv-dev/bin/activate
+
+# Полное окружение (~5 ГБ) — для обучения нейросети
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+source .venv-full/bin/activate
 ```
 
 ---
@@ -154,8 +157,10 @@ uv run test-algorithms --data-root ./test_images --output ./report.html
 
 ```bash
 bash scripts/build_nuitka.sh
-# Результат: ./BacteriaAnalyzer (~120 МБ)
+# Результат: ./BacteriaAnalyzer (~85–125 МБ)
 ```
+
+Сборка всегда идёт из изолированного build-окружения `.venv-build` (создаётся ad-hoc: runtime-зависимости `PyQt6`, `opencv-python-headless`, `numpy` + инструменты сборки `nuitka`, `zstandard`). `.venv`/`.venv-dev`/`.venv-full` при этом не изменяются.
 
 ---
 

@@ -7,7 +7,6 @@ dependencies = [
     "PyQt6>=6.4.0",
     "opencv-python-headless>=4.8.0",
     "numpy>=1.24.0",
-    "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
@@ -19,10 +18,13 @@ test = [
     "hypothesis>=6.100.0",
 ]
 dev = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
     "nuitka>=4.0.0",
     "zstandard>=0.25.0",
+    "bacterial-colony-analyzer[test]",
+]
+full = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
     "tensorboard>=2.17.0",
     "plotly>=5.18.0",
     "fastapi>=0.109.0",
@@ -31,7 +33,8 @@ dev = [
     "rich>=13.7.0",
     "albumentations>=1.3.0",
     "onnxruntime>=1.18.0",
-    "bacterial-colony-analyzer[test]",
+    "tqdm>=4.65.0",
+    "bacterial-colony-analyzer[dev]",
 ]
 
 [build-system]

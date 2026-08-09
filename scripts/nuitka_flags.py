@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parent.parent
 EXCLUDE = {
     ".venv",
     ".venv-dev",
+    ".venv-full",
+    ".venv-build",
     "__pycache__",
     "bacterial_colony_analyzer.egg-info",
     ".git",

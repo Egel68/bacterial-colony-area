@@ -8,6 +8,8 @@ build/
 # Virtual environments
 .venv/
 .venv-dev/
+.venv-full/
+.venv-build/
 
 # Generated training data
 train/data/
