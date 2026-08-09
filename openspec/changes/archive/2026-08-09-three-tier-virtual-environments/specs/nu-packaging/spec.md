@@ -16,9 +16,9 @@
 - **КОГДА** скрипт перебирает каталоги проекта
 - **ТОГДА** `train/` SHALL NOT попадать в флаги `--include-package`
 
-#### Scenario: venv-full excluded from build flags
+#### Scenario: venv directories excluded from build flags
 - **КОГДА** скрипт перебирает каталоги проекта
-- **ТОГДА** `.venv-full` SHALL NOT попадать в флаги `--include-package`
+- **ТОГДА** `.venv`, `.venv-dev`, `.venv-full`, `.venv-build` SHALL NOT попадать в флаги `--include-package`
 
 ## ADDED Requirements
 ### Requirement: Binary built from clean runtime environment
