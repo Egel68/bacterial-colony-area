@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
@@ -57,16 +57,54 @@ def run_algorithm(
     return results
 
 
-def run_all(dataset: TestDataset) -> AllResults:
+def run_all(dataset: TestDataset, algorithms: Optional[List[str]] = None) -> AllResults:
+    """Прогоняет весь реестр (или указанное подмножество) по датасету."""
     all_results: AllResults = {}
 
-    for algo_name in list_algorithms():
+    if algorithms is None:
+        names = list_algorithms()
+    else:
+        names = algorithms
+
+    for algo_name in names:
         algo = get_algorithm(algo_name)
         log.info("Running: %s", algo_name)
         results = run_algorithm(algo, dataset)
         all_results[algo_name] = results
 
     return all_results
+
+
+def compare_algorithms(
+    dataset: TestDataset, name_a: str, name_b: str
+) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """Парное сравнение алгоритмов A и B по снимкам.
+
+    Возвращает вложенный словарь:
+      comparison[metric][sample_key][variant] = "a" | "b" | "tie"
+    """
+    algo_a = get_algorithm(name_a)
+    algo_b = get_algorithm(name_b)
+
+    results_a = run_algorithm(algo_a, dataset)
+    results_b = run_algorithm(algo_b, dataset)
+
+    comparison: Dict[str, Dict[str, Dict[str, str]]] = {}
+    metric_names = ["iou", "dice", "f1", "precision", "recall", "accuracy"]
+
+    for sample_key in results_a:
+        variants = set(results_a[sample_key]) & set(results_b[sample_key])
+        for variant in variants:
+            metrics_a = results_a[sample_key][variant]
+            metrics_b = results_b[sample_key][variant]
+            for metric in metric_names:
+                va = metrics_a.get(metric, 0.0)
+                vb = metrics_b.get(metric, 0.0)
+                comparison.setdefault(metric, {}).setdefault(sample_key, {})[
+                    variant
+                ] = "a" if va > vb else ("b" if vb > va else "tie")
+
+    return comparison
 
 
 def compute_summary(all_results: AllResults) -> List[Dict]:

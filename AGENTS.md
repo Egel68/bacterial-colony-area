@@ -158,22 +158,47 @@ cp -r session/cropped/* test_images/cropped/
 cp -r session/cropped_masks/* test_images/cropped_masks/
 ```
 
-### 2.3. Тестирование алгоритмов (CLI)
+### 2.3. Тестирование алгоритмов
 
 **Назначение:** сравнение алгоритмов детекции на эталонных изображениях.
+
+Запуск доступен двумя способами: **GUI-окно в приложении** («🧪 Тестирование алгоритмов» на главном экране) и **CLI**.
 
 ```bash
 # Из runtime-окружения
 uv run test-algorithms
-# Или указать путь к данным и файл отчёта:
-uv run test-algorithms --data-root ./test_images --output ./my_report.html
+# Или указать путь к данным, алгоритмы, модели и отчёт:
+uv run test-algorithms --data-root ./test_images --output ./my_report.html \
+  --algorithms ClassicDefault,ClassicSolidFill \
+  --model path/to/model.onnx --compare ClassicDefault,ClassicSolidFill \
+  --no-per-snapshot
 ```
 
 **Что делает:**
 1. Загружает парные изображения из `test_images/source/` + `masks/` и `cropped/` + `cropped_masks/`.
-2. Прогоняет каждый зарегистрированный алгоритм на всех изображениях.
+2. Прогоняет выбранные алгоритмы (по умолчанию — все зарегистрированные) на всех изображениях.
 3. Считает метрики: IoU, Dice, F1, Precision, Recall, Accuracy.
 4. Генерирует HTML-отчёт `test_report.html` с таблицами и графиками Chart.js.
+
+**Параметры CLI:**
+
+| Флаг | Описание |
+|---|---|
+| `--data-root` | Корень датасета (по умолчанию `test_images`) |
+| `--output` | Путь к HTML-отчёту |
+| `--algorithms A,B` | Подмножество алгоритмов для прогона |
+| `--model <path>` | Подключить внешнюю ONNX-модель как алгоритм (повторяемый) |
+| `--compare A,B` | Парный сравнение: «победитель по снимку» |
+| `--per-snapshot` / `--no-per-snapshot` | Детальные метрики по снимкам (по умолчанию включены) |
+
+**Алгоритмы и модели:**
+
+- Классические алгоритмы регистрируются через `@register_algorithm` (классы).
+- Нейросетевые/ONNX-модели — через `register_algorithm_instance` (готовый экземпляр).
+  Единый интерфейс: `BaseDetectionAlgorithm` (`name`, `description`, `detect(image, is_cropped)`).
+- Внешние веса: файл `.onnx` подгружается через GUI-кнопку «Загрузить модель» или `--model` — без пересборки приложения.
+- Встроенные веса: файлы `models/*.onnx` упаковываются в бинарник Nuitka (`--include-data-files=models/*.onnx=models/`) и регистрируются автоматически при запуске.
+- `onnxruntime` импортируется лениво (в `detect()`); без него приложение работает, NN-алгоритмы недоступны с понятной ошибкой.
 
 **Доступные алгоритмы:**
 
@@ -309,6 +334,7 @@ bash scripts/build_nuitka.sh
 | `main.py` | Точка входа: QApplication, тёмная тема (Catppuccin Mocha), MainWindow |
 | `ui/main_window.py` | Главное окно: выбор файла, кнопки «Анализировать» и «Разметка» |
 | `ui/analysis_window.py` | Окно анализа: 4 режима просмотра, слайдеры, кнопка «Пересчитать» |
+| `ui/testing_window.py` | Окно тестирования алгоритмов: выбор датасета, чекбоксы алгоритмов, загрузка моделей, QThread-прогон, парное сравнение, экспорт |
 | `ui/styles.py` | Catppuccin Mocha QSS-стили |
 | `analysis/image_processor.py` | Предобработка: CLAHE, зелёный канал, медианный blur |
 | `analysis/colony_detector.py` | Детекция чашки и колоний |
@@ -317,12 +343,14 @@ bash scripts/build_nuitka.sh
 | `testing/` | Фреймворк тестирования алгоритмов |
 | `testing/__main__.py` | CLI `test-algorithms` |
 | `testing/interface.py` | ABC для алгоритмов детекции |
-| `testing/registry.py` | Декоратор `@register_algorithm` |
+| `testing/registry.py` | Декоратор `@register_algorithm` + `register_algorithm_instance` |
 | `testing/classic_algorithms.py` | 4 варианта классического алгоритма |
+| `testing/onnx_algorithm.py` | ONNX-адаптер (`OnnxModelAlgorithm`), сканирование встроенных моделей `models/*.onnx` |
 | `testing/dataset.py` | Загрузчик тестовых пар (изображение + GT-маска) |
 | `testing/metrics.py` | IoU, Dice, F1, Precision, Recall |
 | `testing/runner.py` | Прогон алгоритмов и сбор метрик |
 | `testing/dashboard.py` | HTML-отчёт с Chart.js |
+| `models/` | Встроенные ONNX-модели (`*.onnx`), регистрируются при запуске |
 | `train/` | Модуль обучения U-Net |
 | `train/augment.py` | Аугментация (15× на оригинал, albumentations) |
 | `train/config.py` | Гиперпараметры |
