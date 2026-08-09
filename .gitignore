@@ -5,6 +5,13 @@ __pycache__/
 dist/
 build/
 
+# Nuitka build artifacts
+BacteriaAnalyzer
+BacteriaAnalyzer.exe
+main.dist/
+main.build/
+main.onefile-build/
+
 # Virtual environments
 .venv/
 .venv-dev/
