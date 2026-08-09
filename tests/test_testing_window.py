@@ -4,6 +4,8 @@ from ui.testing_window import TestingWindow, _RunWorker
 
 pytest.importorskip("pytestqt")
 
+pytestmark = pytest.mark.gui
+
 
 @pytest.fixture
 def window(qtbot):
