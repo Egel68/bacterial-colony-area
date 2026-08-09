@@ -16,6 +16,8 @@ class TestSample(NamedTuple):
 
 
 class TestDataset:
+    __test__ = False
+
     def __init__(self, root: str = "test_images"):
         self.root = Path(root)
         self.source_dir = self.root / "source"
