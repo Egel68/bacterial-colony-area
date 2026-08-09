@@ -10,13 +10,16 @@ if ! command -v g++ &>/dev/null; then
   exit 1
 fi
 
-if ! uv run python -c "import nuitka" 2>/dev/null; then
-  echo "Устанавливаю Nuitka..."
-  uv pip install nuitka zstandard
-fi
+# Сборка идёт из изолированного build-окружения .venv-build,
+# чтобы НЕ загрязнять .venv / .venv-dev dev- и ML-пакетами.
+# .venv-build содержит только runtime-зависимости + инструменты сборки (nuitka, zstandard).
+echo "=== Создание чистого build-окружения .venv-build ==="
+rm -rf .venv-build
+UV_PROJECT_ENVIRONMENT=.venv-build uv sync
+UV_PROJECT_ENVIRONMENT=.venv-build uv pip install --python .venv-build nuitka zstandard
 
 echo "=== Запуск Nuitka ==="
-uv run python scripts/nuitka_build.py \
+UV_PROJECT_ENVIRONMENT=.venv-build uv run --no-sync python scripts/nuitka_build.py \
   --standalone \
   --onefile \
   --show-progress \

@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 
 from analysis.geometry import PetriInfo
+from labeling.session_manager import ensure_session_structure
 from ui.controllers.labeling_controller import LabelingController
 from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
@@ -200,7 +201,8 @@ class LabelingWindow(QMainWindow):
     def __init__(self, session_dir: Path, parent=None):
         super().__init__(parent)
         self.session_dir = session_dir.resolve()
-        self.source_dir = self.session_dir
+        ensure_session_structure(self.session_dir)
+        self.source_dir = self.session_dir / "source"
         self.masks_dir = self.session_dir / "masks"
         self.cropped_dir = self.session_dir / "cropped"
         self.cropped_masks_dir = self.session_dir / "cropped_masks"
@@ -216,7 +218,7 @@ class LabelingWindow(QMainWindow):
         self._load_file_list()
 
     def _init_ui(self):
-        self.setWindowTitle(f"Разметка — {self.session_dir.name}")
+        self.setWindowTitle(f"Разметка — {self.session_dir}")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -244,6 +246,11 @@ class LabelingWindow(QMainWindow):
         title = QLabel("📁 Тестовые изображения")
         title.setStyleSheet("font-weight: bold; font-size: 14px; color: #89b4fa;")
         vl.addWidget(title)
+
+        self.path_label = QLabel()
+        self.path_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self.path_label.setWordWrap(True)
+        vl.addWidget(self.path_label)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["📁 Исходные изображения", "✂️ Обрезки чашек"])
@@ -528,6 +535,10 @@ class LabelingWindow(QMainWindow):
     def _get_mask_dir(self):
         return self.controller.get_mask_dir(self.session_dir, self.mode)
 
+    def _update_path_label(self):
+        working = self._get_current_dir()
+        self.path_label.setText(f"📁 {working}")
+
     def _on_add_images(self):
         files, _ = QFileDialog.getOpenFileNames(
             self,
@@ -572,6 +583,7 @@ class LabelingWindow(QMainWindow):
             item = QListWidgetItem(f.name)
             item.setData(Qt.ItemDataRole.UserRole, str(f))
             self.file_list.addItem(item)
+        self._update_path_label()
 
     def _on_file_selected(self, item: QListWidgetItem):
         path = Path(item.data(Qt.ItemDataRole.UserRole))

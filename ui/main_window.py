@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -20,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .analysis_window import AnalysisWindow
-from labeling import LabelingWindow
+from .labeling_session_dialog import LabelingSessionDialog
 from utils.image_loader import SUPPORTED_EXTENSIONS
 
 
@@ -171,13 +172,13 @@ class MainWindow(QMainWindow):
         layout.addLayout(label_layout)
 
     def _open_labeling(self):
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Выберите или создайте папку для сессии разметки",
-            str(Path.home() / "BacteriaLabeling"),
-        )
-        if folder:
-            self.labeling_window = LabelingWindow(Path(folder), self)
+        from labeling import LabelingWindow
+        from labeling.session_manager import SessionManager
+
+        manager = SessionManager()
+        dialog = LabelingSessionDialog(manager, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.session_dir:
+            self.labeling_window = LabelingWindow(dialog.session_dir, self)
             self.labeling_window.show()
 
     def _open_file_dialog(self):

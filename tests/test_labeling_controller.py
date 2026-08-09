@@ -97,10 +97,10 @@ class TestGetCurrentDir:
             session_dir / "source"
         )
 
-    def test_source_empty_falls_back_to_session(self, controller, session_dir):
-        session_dir.mkdir()
-        _make_image(session_dir / "img.png")
-        assert controller.get_current_dir(session_dir, "source") == session_dir
+    def test_source_dir_created_if_missing(self, controller, session_dir):
+        result = controller.get_current_dir(session_dir, "source")
+        assert result == session_dir / "source"
+        assert result.is_dir()
 
     def test_cropped_dir_preferred(self, controller, session_dir):
         (session_dir / "cropped").mkdir(parents=True)
@@ -108,6 +108,11 @@ class TestGetCurrentDir:
         assert controller.get_current_dir(session_dir, "cropped") == (
             session_dir / "cropped"
         )
+
+    def test_cropped_dir_created_if_missing(self, controller, session_dir):
+        result = controller.get_current_dir(session_dir, "cropped")
+        assert result == session_dir / "cropped"
+        assert result.is_dir()
 
 
 class TestGetMaskDir:
