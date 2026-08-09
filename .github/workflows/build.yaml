@@ -19,7 +19,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Set git default branch
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
@@ -30,7 +33,7 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y g++ patchelf
+        run: sudo apt-get update && sudo apt-get install -y g++ patchelf ccache
 
       - name: Install project dependencies
         run: uv sync --extra dev
@@ -94,14 +97,14 @@ jobs:
 
       - name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BacteriaAnalyzer-Linux
           path: BacteriaAnalyzer
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BacteriaAnalyzer-Windows
           path: BacteriaAnalyzer.exe
