@@ -1,15 +1,6 @@
 # unet-training Specification
 
-## Purpose
-TBD - created by archiving change ml-pipeline. Update Purpose after archive.
-## Requirements
-### Requirement: Training configuration
-
-Система SHALL предоставлять `TrainingConfig` (dataclass) с полями: `data_root=train/data`, `img_size=512`, `batch_size=8`, `epochs=200`, `lr=1e-3`, `weight_decay=1e-5`, `val_split=0.2`, `num_workers=4`, `seed=42`, `patience=30`, `augment=True`, `model_name="unet"`, `run_dir=train/runs`, `device="cuda"`, `dashboard=False`, `dashboard_port=8765`.
-
-#### Scenario: Default config constructs
-- **КОГДА** создаётся `TrainingConfig()` без аргументов
-- **ТОГДА** все поля имеют значения по умолчанию из спецификации
+## MODIFIED Requirements
 
 ### Requirement: Dataset loading and split
 
@@ -46,28 +37,3 @@ TBD - created by archiving change ml-pipeline. Update Purpose after archive.
 #### Scenario: Architecture params passed
 - **КОГДА** `get_model("unet_small", features=(32, 64, 128, 256))`
 - **ТОГДА** возвращаемая модель SHALL использовать переданные параметры каналов
-
-### Requirement: Loss and metrics
-
-Модель SHALL вычислять лосс как BCE + Dice (`smooth=1e-6`). `compute_metrics` SHALL возвращать `loss`, `iou`, `dice`, `precision`, `recall` по бинаризации предсказаний порогом `>threshold` (по умолчанию 0.5).
-
-#### Scenario: Perfect prediction on identity
-- **КОГДА** `compute_metrics(pred, target)` с pred и target, совпадающими после сигнатуры (>0.5) на ненулевом объекте
-- **ТОГДА** `iou`/`dice`/`precision`/`recall` SHALL равняться 1.0 (с точностью `smooth=1e-6`)
-
-### Requirement: Training loop
-
-`run_training` SHALL запускать цикл из `cfg.epochs`, оптимизируя AdamW `lr=cfg.lr, weight_decay=cfg.weight_decay` с `CosineAnnealingLR(T_max=epochs)`. Система SHALL сохранять в `run_dir/{model}_{timestamp}/`: чекпоинты в `checkpoints/` — `best.pt`+`best.onnx` (лучший по валидационному `iou`) и `last.pt`+`last.onnx` после каждой эпохи, логи тензора в `tensorboard/`, и `summary.json` (model, epochs, best_epoch, best_iou, train/val samples, img_size). При отсутствии улучшения более `cfg.patience` эпох система SHALL остановиться досрочно. Если `dashboard=True`, система SHALL запустить веб-дашборд на порту `dashboard_port`.
-
-#### Scenario: Train and validation history recorded
-- **КОГДА** `run_training(cfg)` отработает на минимальном датасете
-- **ТОГДА** SHALL вернуться `summary`, `train_hist`, `val_hist` (длина = числу эпох), а в `run_dir` SHALL существовать `summary.json` и `checkpoints/best.pt`
-
-### Requirement: ONNX экспорт и загрузка
-
-Модель SHALL экспортироваться в ONNX (`opset=18`, dynamic batch axis), и `load_onnx(path)` SHALL возвращать `onnxruntime.InferenceSession`. Предобработка `preprocess` SHALL resize в `img_size`, нормировать на ImageNet и добавить batch-dims.
-
-#### Scenario: ONNX export produces valid session
-- **КОГДА** модель экспортируется в файл `best.onnx`
-- **ТОГДА** `load_onnx("best.onnx")` SHALL создать инференс-сессию без исключений
-

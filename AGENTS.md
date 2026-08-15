@@ -242,13 +242,30 @@ UV_PROJECT_ENVIRONMENT=.venv-dev uv run python -m train.main train --model unet 
 
 | Параметр | По умолчанию | Описание |
 |---|---|---|
-| `--model` | unet | Архитектура (сейчас только unet) |
+| `--model` | unet | Архитектура (список: `unet`, `unet_small`; полный — `list-models`) |
 | `--epochs` | 200 | Максимум эпох |
 | `--batch-size` | 8 | Размер батча |
 | `--lr` | 1e-3 | Learning rate |
 | `--img-size` | 512 | Размер изображений при обучении |
 | `--no-augment` | — | Отключить аугментацию |
 | `--dashboard` | — | Включить веб-дашборд (порт 8765) |
+
+**Сравнение архитектур (`train.main train-compare`):**
+
+```bash
+uv run python -m train.main train-compare --architectures unet,unet_small \
+  --data-root train/data --eval-root test_images --epochs 2
+```
+
+Обучает каждую архитектуру из списка и оценивает `best.onnx` каждой на тестовых парах
+(`TestDataset` из `testing/`), формируя сводный отчёт в `train/runs/compare_{timestamp}/`
+(`compare.json` + `compare.html`).
+
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `--architectures` | unet,unet_small | Список архитектур через запятую |
+| `--data-root` | train/data | Корень обучающих данных |
+| `--eval-root` | test_images | Корень тестовых пар для оценки |
 
 **Мониторинг в реальном времени:**
 
@@ -275,6 +292,36 @@ xdg-open train/runs/unet_20260204_120000/report.html
 # Или через TensorBoard
 tensorboard --logdir train/runs/unet_20260204_120000/tensorboard
 ```
+
+### 2.6. Контракт данных и задел импортёров
+
+**Контракт данных.** Обучение не знает о конкретных структурах папок: оно
+потребляет **манифест** `DatasetManifest` — список пар «изображение + маска» с
+метаданными (`mask_mode`, `subset`, `kind`, `storage`). Источники данных
+подключаются через адаптеры (`train/dataset_adapters.py`):
+
+| Адаптер | Что читает |
+|---|---|
+| `ManifestAdapter` | Готовый `dataset.json` в корне датасета |
+| `LabelingAdapter` | Структуру сессии разметки: `source/` + `masks/{stem}_mask`, `cropped/` + `cropped_masks/{stem}_cropped_mask` (без копирования, `storage="reference"`) |
+| `PairsAdapter` | Легаси `images/` + `masks/` по совпадающим именам |
+
+Фабрика `load_manifest(data_root)` выбирает адаптер в порядке: `dataset.json` →
+`source/` → `images/`. `make_datasets` разбивает записи на train/val по `subset`
+из манифеста или, при его отсутствии, seed-сплитом от `val_split`.
+
+**Задел на будущее (НЕ реализовано):**
+
+- **Импортёры внешних датасетов.** Планируется подключать внешние данные
+  (COCO / VOC / произвольные пары) через декоратор `@register_importer`: импортёр
+  растризует анотации в `{id}_mask.png`, материализует файлы (`storage="copy"` —
+  самодостаточная папка, либо `reference` — ссылки на местонахождение) и пишет
+  `dataset.json` той же схемы, что и `ManifestAdapter`. Ядро обучения при этом не
+  меняется — контракт уже готов.
+- **Multiclass-маски.** `mask_mode` в манифесте резервирует значение
+  `multiclass`. Сейчас конвейер (loss BCE+Dice, бинаризация порогом 0.5)
+  поддерживает только `binary` и бросает понятную ошибку при попытке обучать
+  multiclass. Точки расширения помечены комментариями в `train/dataset_manifest.py`.
 
 ---
 

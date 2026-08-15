@@ -20,6 +20,7 @@ main.onefile-build/
 
 # Generated training data
 train/data/
+train/runs/
 train/runs/**/*.pt
 train/runs/**/*.onnx.data
 train/runs/**/tensorboard/
