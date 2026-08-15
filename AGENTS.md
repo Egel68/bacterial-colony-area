@@ -247,6 +247,7 @@ UV_PROJECT_ENVIRONMENT=.venv-dev uv run python -m train.main train --model unet 
 | `--batch-size` | 8 | Размер батча |
 | `--lr` | 1e-3 | Learning rate |
 | `--img-size` | 512 | Размер изображений при обучении |
+| `--data-root` | train/data | Корень обучающих данных (манифест/папка пар) |
 | `--no-augment` | — | Отключить аугментацию |
 | `--dashboard` | — | Включить веб-дашборд (порт 8765) |
 
@@ -322,6 +323,52 @@ tensorboard --logdir train/runs/unet_20260204_120000/tensorboard
   `multiclass`. Сейчас конвейер (loss BCE+Dice, бинаризация порогом 0.5)
   поддерживает только `binary` и бросает понятную ошибку при попытке обучать
   multiclass. Точки расширения помечены комментариями в `train/dataset_manifest.py`.
+
+### 2.7. Импорт внешнего датасета 22022540 (COCO-bbox) и готовая модель
+
+**Первый материализованный импортёр** — `CocoBboxImporter` (`train/dataset_adapters.py`),
+приводит детекционный датасет `datasets/22022540` (369 изображений, 56 865 колоний,
+24 вида, аннотации COCO/TSV/YOLO/VOC) к контракту обучения: растризует боксы во
+**вписанные эллипсы** бинарной маской (255 = колония) и пишет самодостаточную папку
+с `dataset.json` (читается `ManifestAdapter`). Модель определяет **наличие колонии**,
+а не класс бактерии.
+
+```bash
+# Полный импорт (source-снимки, ~607 МБ, 2–3 мин; без GUI)
+uv run import-22022540 --data-root datasets/22022540 --output <dir> [--crop] [--verify]
+
+# Создание пары "изображение + маска" и проверка читаемости манифестом:
+#   --output/<dir>/source/*.jpg + source/*_mask.png + dataset.json
+#   load_manifest(<dir>) SHALL резолвиться через ManifestAdapter
+```
+
+- `--crop` — дополнительно формирует обрезки по чашке (`kind=cropped`, чёрный фон
+  вне круга); при этом `dish={cx,cy,r}` вычисляется авто-поиском (`analysis/colony_detector.py`).
+  Для source-only-импорта авто-поиск чашки пропускается ради скорости.
+- `--verify` — сверка числа масок на снимок с числом боксов из COCO и YOLO/VOC-дублей;
+  предупреждает при расхождении > 5 (в этом датасете форматы согласованы, 0 расхождений).
+- Источник читается только; выход пишется в `--output` (`storage="copy"`).
+
+**Готовая модель** — `models/colony_seg.onnx` (U-Net, обучен на импортированном
+датасете 22022540, бинарная сегментация). Автоматически регистрируется при старте
+как алгоритм `NN:colony_seg` через `register_bundled_models`; сигнатура
+`detect(image)->uint8 mask` (порог 0.5). Базовые метрики на валидации: IoU 0.72,
+Dice 0.83.
+
+**Воспроизведение обучения:**
+```bash
+# 1) Импорт датасета
+uv run import-22022540 --data-root datasets/22022540 --output /tmp/ds_22022540
+# 2) Обучение (в окружении .venv-full)
+UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train \
+  --model unet --data-root /tmp/ds_22022540 --img-size 512 --epochs 200
+# 3) best.onnx лежит в train/runs/unet_<ts>/checkpoints/best.onnx
+# 4) (опционально) компактный single-file ONNX без внешних данных:
+UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
+  --checkpoint train/runs/unet_<ts>/checkpoints/best.pt \
+  --output models/colony_seg.onnx --img-size 512
+# 5) Инференс как алгоритм: тест покрыт tests/test_coco_importer.py + OnnxModelAlgorithm
+```
 
 ---
 

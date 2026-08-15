@@ -64,3 +64,4 @@ markers = [
 bacteria-analyzer = "main:main"
 augment = "train.augment:main"
 test-algorithms = "testing.__main__:main"
+import-22022540 = "train.importer_cli:main"

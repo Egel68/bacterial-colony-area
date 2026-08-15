@@ -25,6 +25,7 @@ def _train(args):
         lr=args.lr,
         dashboard=args.dashboard,
         dashboard_port=args.dashboard_port,
+        data_root=args.data_root,
     )
 
     if args.dashboard:
@@ -147,6 +148,9 @@ def main():
     train_parser.add_argument("--batch-size", type=int, default=8)
     train_parser.add_argument("--img-size", type=int, default=512)
     train_parser.add_argument("--lr", type=float, default=1e-3)
+    train_parser.add_argument(
+        "--data-root", default="train/data", help="Training data root"
+    )
     train_parser.add_argument(
         "--dashboard", action="store_true", help="Enable web dashboard"
     )
