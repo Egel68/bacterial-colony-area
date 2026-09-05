@@ -28,6 +28,9 @@ train/runs/**/report.html
 
 # Test reports
 test_report.html
+
+# Generated datasets
+datasets/*_imported/
 coverage/
 .coverage
 coverage.xml

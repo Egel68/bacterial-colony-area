@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+from .baseline import BaselineDataset, run_baseline, export_json
 from .classic_algorithms import *  # noqa: F401, F403 — triggers @register_algorithm
 from .dashboard import generate_report
 from .dataset import TestDataset
@@ -32,6 +33,12 @@ def main():
     setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Test colony detection algorithms")
     parser.add_argument(
+        "--mode",
+        default="report",
+        choices=["report", "baseline"],
+        help="Mode: 'report' (default, HTML report) or 'baseline' (JSON baseline metrics)",
+    )
+    parser.add_argument(
         "--output", default="test_report.html", help="Output HTML report path"
     )
     parser.add_argument(
@@ -61,8 +68,17 @@ def main():
         metavar="A,B",
         help="Two algorithm names to produce a pairwise comparison section",
     )
+    parser.add_argument(
+        "--no-cropped",
+        dest="use_cropped",
+        action="store_false",
+        default=True,
+        help="Disable cropped variant processing in baseline mode",
+    )
     args = parser.parse_args()
 
+    if args.mode == "baseline":
+        return _run_baseline(args)
     _register_models(args.model)
     algorithms = _parse_algorithms(args.algorithms)
 
@@ -92,6 +108,22 @@ def main():
     )
 
     log.info("Done.")
+
+
+def _run_baseline(args):
+    log.info("Baseline mode: %s", args.data_root)
+    dataset = BaselineDataset(root=args.data_root)
+    log.info(
+        "Dataset: %d source, %d cropped samples",
+        dataset.count_source(),
+        dataset.count_cropped(),
+    )
+    if len(dataset) == 0:
+        log.warning("No test samples found.")
+        return
+    result = run_baseline(dataset, use_cropped=args.use_cropped)
+    export_json(result, args.output)
+    log.info("Baseline report written to %s", args.output)
 
 
 if __name__ == "__main__":
