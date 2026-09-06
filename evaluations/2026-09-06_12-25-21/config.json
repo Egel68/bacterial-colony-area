@@ -1,5 +1,5 @@
 {
-  "data_root": "test_images",
+  "data_root": "datasets/22022540_imported",
   "use_cropped": true,
   "algorithms": null,
   "models": [],

@@ -1,0 +1,17 @@
+{
+  "run_id": "2026-09-06_13-53-08",
+  "timestamp": "2026-09-06T10:53:08.261246+00:00",
+  "dataset_path": "datasets/22022540_imported",
+  "dataset_size": {
+    "source": 369,
+    "cropped": 369
+  },
+  "algorithms_run": [
+    "ClassicDefault",
+    "ClassicHighSensitivity",
+    "ClassicSolidFill",
+    "ClassicLowSensitivity"
+  ],
+  "git_commit": "25fb9aaea4a55a0d96c6a9e089a482187a561aa7",
+  "git_message": "feat: reproducible evaluation pipeline with run tracking"
+}

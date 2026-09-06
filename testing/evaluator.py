@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .baseline import BaselineDataset, run_baseline, export_json
+from .cache import load_cache, save_cache, clear_cache, compute_dataset_signature
 from .classic_algorithms import *  # noqa: F401, F403
 
 log = logging.getLogger(__name__)
@@ -260,7 +261,18 @@ def run_evaluate(config: dict) -> str:
         log.warning("No samples found, aborting")
         return run_id
 
-    result = run_baseline(dataset, use_cropped=config.get("use_cropped", True))
+    cache = load_cache(config["data_root"])
+    cache_algorithms = cache["algorithms"] if cache else {}
+
+    result = run_baseline(dataset, use_cropped=config.get("use_cropped", True), cache=cache_algorithms)
+
+    full_cache = {
+        "dataset_root": config["data_root"],
+        "dataset_signature": compute_dataset_signature(config["data_root"]),
+        "created": datetime.now(timezone.utc).isoformat(),
+        "algorithms": cache_algorithms,
+    }
+    save_cache(config["data_root"], full_cache)
 
     git_info = get_git_info()
     result["run_id"] = run_id

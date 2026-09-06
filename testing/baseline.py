@@ -179,7 +179,7 @@ class BaselineDataset:
         return iter(self._samples)
 
 
-def run_baseline(dataset: BaselineDataset, use_cropped: bool = True) -> dict:
+def run_baseline(dataset: BaselineDataset, use_cropped: bool = True, cache: dict | None = None) -> dict:
     algo_names = [
         "ClassicDefault",
         "ClassicHighSensitivity",
@@ -195,41 +195,53 @@ def run_baseline(dataset: BaselineDataset, use_cropped: bool = True) -> dict:
         "algorithms": [],
     }
 
+    if cache is None:
+        cache = {}
+    if cache:
+        log.info("Cache provided with %d algorithm(s): %s", len(cache), list(cache.keys()))
+
     for algo_name in algo_names:
-        algo = get_algorithm(algo_name)
-        source_metrics_list = []
-        cropped_metrics_list = []
+        cached_entry = cache.get(algo_name)
+        if cached_entry is not None:
+            log.info("Skipping %s (cached)", algo_name)
+            entry = cached_entry
+        else:
+            algo = get_algorithm(algo_name)
+            source_metrics_list = []
+            cropped_metrics_list = []
 
-        try:
-            from tqdm import tqdm as _tqdm
-            iterator = _tqdm(dataset, desc=algo_name, unit="img")
-        except ImportError:
-            log.info("Running: %s", algo_name)
-            iterator = dataset
+            try:
+                from tqdm import tqdm as _tqdm
+                iterator = _tqdm(dataset, desc=algo_name, unit="img")
+            except ImportError:
+                log.info("Running: %s", algo_name)
+                iterator = dataset
 
-        for sample in iterator:
-            if sample.variant == "source":
-                img = sample.load_image()
-                gt = sample.load_mask()
-                pred = algo.detect(img, is_cropped=False)
-                source_metrics_list.append(compute_segmentation_metrics(pred, gt))
+            for sample in iterator:
+                if sample.variant == "source":
+                    img = sample.load_image()
+                    gt = sample.load_mask()
+                    pred = algo.detect(img, is_cropped=False)
+                    source_metrics_list.append(compute_segmentation_metrics(pred, gt))
 
-            if sample.variant == "cropped" and use_cropped:
-                img = sample.load_image()
-                gt = sample.load_mask()
-                pred = algo.detect(img, is_cropped=True)
-                cropped_metrics_list.append(compute_segmentation_metrics(pred, gt))
+                if sample.variant == "cropped" and use_cropped:
+                    img = sample.load_image()
+                    gt = sample.load_mask()
+                    pred = algo.detect(img, is_cropped=True)
+                    cropped_metrics_list.append(compute_segmentation_metrics(pred, gt))
 
-        entry: dict = {
-            "name": algo_name,
-            "description": desc_map.get(algo_name, ""),
-            "source": _mean_metrics(source_metrics_list),
-        }
-        entry["source"]["num_samples"] = len(source_metrics_list)
+            entry: dict = {
+                "name": algo_name,
+                "description": desc_map.get(algo_name, ""),
+                "source": _mean_metrics(source_metrics_list),
+            }
+            entry["source"]["num_samples"] = len(source_metrics_list)
 
-        if use_cropped and cropped_metrics_list:
-            entry["cropped"] = _mean_metrics(cropped_metrics_list)
-            entry["cropped"]["num_samples"] = len(cropped_metrics_list)
+            if use_cropped and cropped_metrics_list:
+                entry["cropped"] = _mean_metrics(cropped_metrics_list)
+                entry["cropped"]["num_samples"] = len(cropped_metrics_list)
+
+            cache[algo_name] = entry
 
         result["algorithms"].append(entry)
 

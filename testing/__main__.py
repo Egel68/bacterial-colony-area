@@ -2,6 +2,7 @@ import argparse
 import logging
 
 from .baseline import BaselineDataset, run_baseline, export_json
+from .cache import clear_cache
 from .classic_algorithms import *  # noqa: F401, F403 — triggers @register_algorithm
 from .evaluator import run_evaluate, load_config, EVALUATIONS_DIR
 from .dashboard import generate_report
@@ -86,6 +87,12 @@ def main():
         default=None,
         help="Import dataset from this root before evaluation (evaluate mode)",
     )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        default=False,
+        help="Clear evaluation cache for the dataset before running",
+    )
     args = parser.parse_args()
 
     if args.mode == "evaluate":
@@ -123,6 +130,8 @@ def main():
 
 def _run_evaluate(args):
     log.info("Evaluate mode")
+    if args.clear_cache:
+        clear_cache(args.data_root)
     cli_dict = {
         "data_root": args.data_root,
         "use_cropped": args.use_cropped,
@@ -159,8 +168,11 @@ def main_evaluate():
     parser.add_argument("--no-cropped", dest="use_cropped", action="store_false", default=True)
     parser.add_argument("--config", default=None)
     parser.add_argument("--import-root", default=None)
+    parser.add_argument("--clear-cache", action="store_true", default=False)
     args = parser.parse_args()
     log.info("Evaluate mode")
+    if args.clear_cache:
+        clear_cache(args.data_root)
     cli_dict = {
         "data_root": args.data_root,
         "use_cropped": args.use_cropped,
