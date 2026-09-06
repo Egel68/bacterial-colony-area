@@ -25,6 +25,7 @@ dev = [
 full = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
+    "onnxscript",
     "tensorboard>=2.17.0",
     "plotly>=5.18.0",
     "fastapi>=0.109.0",
@@ -63,3 +64,6 @@ markers = [
 bacteria-analyzer = "main:main"
 augment = "train.augment:main"
 test-algorithms = "testing.__main__:main"
+import-22022540 = "train.importer_cli:main"
+baseline = "testing.__main__:main"
+evaluate = "testing.__main__:main_evaluate"

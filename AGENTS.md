@@ -158,22 +158,47 @@ cp -r session/cropped/* test_images/cropped/
 cp -r session/cropped_masks/* test_images/cropped_masks/
 ```
 
-### 2.3. Тестирование алгоритмов (CLI)
+### 2.3. Тестирование алгоритмов
 
 **Назначение:** сравнение алгоритмов детекции на эталонных изображениях.
+
+Запуск доступен двумя способами: **GUI-окно в приложении** («🧪 Тестирование алгоритмов» на главном экране) и **CLI**.
 
 ```bash
 # Из runtime-окружения
 uv run test-algorithms
-# Или указать путь к данным и файл отчёта:
-uv run test-algorithms --data-root ./test_images --output ./my_report.html
+# Или указать путь к данным, алгоритмы, модели и отчёт:
+uv run test-algorithms --data-root ./test_images --output ./my_report.html \
+  --algorithms ClassicDefault,ClassicSolidFill \
+  --model path/to/model.onnx --compare ClassicDefault,ClassicSolidFill \
+  --no-per-snapshot
 ```
 
 **Что делает:**
 1. Загружает парные изображения из `test_images/source/` + `masks/` и `cropped/` + `cropped_masks/`.
-2. Прогоняет каждый зарегистрированный алгоритм на всех изображениях.
+2. Прогоняет выбранные алгоритмы (по умолчанию — все зарегистрированные) на всех изображениях.
 3. Считает метрики: IoU, Dice, F1, Precision, Recall, Accuracy.
 4. Генерирует HTML-отчёт `test_report.html` с таблицами и графиками Chart.js.
+
+**Параметры CLI:**
+
+| Флаг | Описание |
+|---|---|
+| `--data-root` | Корень датасета (по умолчанию `test_images`) |
+| `--output` | Путь к HTML-отчёту |
+| `--algorithms A,B` | Подмножество алгоритмов для прогона |
+| `--model <path>` | Подключить внешнюю ONNX-модель как алгоритм (повторяемый) |
+| `--compare A,B` | Парный сравнение: «победитель по снимку» |
+| `--per-snapshot` / `--no-per-snapshot` | Детальные метрики по снимкам (по умолчанию включены) |
+
+**Алгоритмы и модели:**
+
+- Классические алгоритмы регистрируются через `@register_algorithm` (классы).
+- Нейросетевые/ONNX-модели — через `register_algorithm_instance` (готовый экземпляр).
+  Единый интерфейс: `BaseDetectionAlgorithm` (`name`, `description`, `detect(image, is_cropped)`).
+- Внешние веса: файл `.onnx` подгружается через GUI-кнопку «Загрузить модель» или `--model` — без пересборки приложения.
+- Встроенные веса: файлы `models/*.onnx` упаковываются в бинарник Nuitka (`--include-data-files=models/*.onnx=models/`) и регистрируются автоматически при запуске.
+- `onnxruntime` импортируется лениво (в `detect()`); без него приложение работает, NN-алгоритмы недоступны с понятной ошибкой.
 
 **Доступные алгоритмы:**
 
@@ -217,13 +242,31 @@ UV_PROJECT_ENVIRONMENT=.venv-dev uv run python -m train.main train --model unet 
 
 | Параметр | По умолчанию | Описание |
 |---|---|---|
-| `--model` | unet | Архитектура (сейчас только unet) |
+| `--model` | unet | Архитектура (список: `unet`, `unet_small`; полный — `list-models`) |
 | `--epochs` | 200 | Максимум эпох |
 | `--batch-size` | 8 | Размер батча |
 | `--lr` | 1e-3 | Learning rate |
 | `--img-size` | 512 | Размер изображений при обучении |
+| `--data-root` | train/data | Корень обучающих данных (манифест/папка пар) |
 | `--no-augment` | — | Отключить аугментацию |
 | `--dashboard` | — | Включить веб-дашборд (порт 8765) |
+
+**Сравнение архитектур (`train.main train-compare`):**
+
+```bash
+uv run python -m train.main train-compare --architectures unet,unet_small \
+  --data-root train/data --eval-root test_images --epochs 2
+```
+
+Обучает каждую архитектуру из списка и оценивает `best.onnx` каждой на тестовых парах
+(`TestDataset` из `testing/`), формируя сводный отчёт в `train/runs/compare_{timestamp}/`
+(`compare.json` + `compare.html`).
+
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `--architectures` | unet,unet_small | Список архитектур через запятую |
+| `--data-root` | train/data | Корень обучающих данных |
+| `--eval-root` | test_images | Корень тестовых пар для оценки |
 
 **Мониторинг в реальном времени:**
 
@@ -249,6 +292,82 @@ xdg-open train/runs/unet_20260204_120000/report.html
 
 # Или через TensorBoard
 tensorboard --logdir train/runs/unet_20260204_120000/tensorboard
+```
+
+### 2.6. Контракт данных и задел импортёров
+
+**Контракт данных.** Обучение не знает о конкретных структурах папок: оно
+потребляет **манифест** `DatasetManifest` — список пар «изображение + маска» с
+метаданными (`mask_mode`, `subset`, `kind`, `storage`). Источники данных
+подключаются через адаптеры (`train/dataset_adapters.py`):
+
+| Адаптер | Что читает |
+|---|---|
+| `ManifestAdapter` | Готовый `dataset.json` в корне датасета |
+| `LabelingAdapter` | Структуру сессии разметки: `source/` + `masks/{stem}_mask`, `cropped/` + `cropped_masks/{stem}_cropped_mask` (без копирования, `storage="reference"`) |
+| `PairsAdapter` | Легаси `images/` + `masks/` по совпадающим именам |
+
+Фабрика `load_manifest(data_root)` выбирает адаптер в порядке: `dataset.json` →
+`source/` → `images/`. `make_datasets` разбивает записи на train/val по `subset`
+из манифеста или, при его отсутствии, seed-сплитом от `val_split`.
+
+**Задел на будущее (НЕ реализовано):**
+
+- **Импортёры внешних датасетов.** Планируется подключать внешние данные
+  (COCO / VOC / произвольные пары) через декоратор `@register_importer`: импортёр
+  растризует анотации в `{id}_mask.png`, материализует файлы (`storage="copy"` —
+  самодостаточная папка, либо `reference` — ссылки на местонахождение) и пишет
+  `dataset.json` той же схемы, что и `ManifestAdapter`. Ядро обучения при этом не
+  меняется — контракт уже готов.
+- **Multiclass-маски.** `mask_mode` в манифесте резервирует значение
+  `multiclass`. Сейчас конвейер (loss BCE+Dice, бинаризация порогом 0.5)
+  поддерживает только `binary` и бросает понятную ошибку при попытке обучать
+  multiclass. Точки расширения помечены комментариями в `train/dataset_manifest.py`.
+
+### 2.7. Импорт внешнего датасета 22022540 (COCO-bbox) и готовая модель
+
+**Первый материализованный импортёр** — `CocoBboxImporter` (`train/dataset_adapters.py`),
+приводит детекционный датасет `datasets/22022540` (369 изображений, 56 865 колоний,
+24 вида, аннотации COCO/TSV/YOLO/VOC) к контракту обучения: растризует боксы во
+**вписанные эллипсы** бинарной маской (255 = колония) и пишет самодостаточную папку
+с `dataset.json` (читается `ManifestAdapter`). Модель определяет **наличие колонии**,
+а не класс бактерии.
+
+```bash
+# Полный импорт (source-снимки, ~607 МБ, 2–3 мин; без GUI)
+uv run import-22022540 --data-root datasets/22022540 --output <dir> [--crop] [--verify]
+
+# Создание пары "изображение + маска" и проверка читаемости манифестом:
+#   --output/<dir>/source/*.jpg + source/*_mask.png + dataset.json
+#   load_manifest(<dir>) SHALL резолвиться через ManifestAdapter
+```
+
+- `--crop` — дополнительно формирует обрезки по чашке (`kind=cropped`, чёрный фон
+  вне круга); при этом `dish={cx,cy,r}` вычисляется авто-поиском (`analysis/colony_detector.py`).
+  Для source-only-импорта авто-поиск чашки пропускается ради скорости.
+- `--verify` — сверка числа масок на снимок с числом боксов из COCO и YOLO/VOC-дублей;
+  предупреждает при расхождении > 5 (в этом датасете форматы согласованы, 0 расхождений).
+- Источник читается только; выход пишется в `--output` (`storage="copy"`).
+
+**Готовая модель** — `models/colony_seg.onnx` (U-Net, обучен на импортированном
+датасете 22022540, бинарная сегментация). Автоматически регистрируется при старте
+как алгоритм `NN:colony_seg` через `register_bundled_models`; сигнатура
+`detect(image)->uint8 mask` (порог 0.5). Базовые метрики на валидации: IoU 0.72,
+Dice 0.83.
+
+**Воспроизведение обучения:**
+```bash
+# 1) Импорт датасета
+uv run import-22022540 --data-root datasets/22022540 --output /tmp/ds_22022540
+# 2) Обучение (в окружении .venv-full)
+UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train \
+  --model unet --data-root /tmp/ds_22022540 --img-size 512 --epochs 200
+# 3) best.onnx лежит в train/runs/unet_<ts>/checkpoints/best.onnx
+# 4) (опционально) компактный single-file ONNX без внешних данных:
+UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
+  --checkpoint train/runs/unet_<ts>/checkpoints/best.pt \
+  --output models/colony_seg.onnx --img-size 512
+# 5) Инференс как алгоритм: тест покрыт tests/test_coco_importer.py + OnnxModelAlgorithm
 ```
 
 ---
@@ -309,6 +428,7 @@ bash scripts/build_nuitka.sh
 | `main.py` | Точка входа: QApplication, тёмная тема (Catppuccin Mocha), MainWindow |
 | `ui/main_window.py` | Главное окно: выбор файла, кнопки «Анализировать» и «Разметка» |
 | `ui/analysis_window.py` | Окно анализа: 4 режима просмотра, слайдеры, кнопка «Пересчитать» |
+| `ui/testing_window.py` | Окно тестирования алгоритмов: выбор датасета, чекбоксы алгоритмов, загрузка моделей, QThread-прогон, парное сравнение, экспорт |
 | `ui/styles.py` | Catppuccin Mocha QSS-стили |
 | `analysis/image_processor.py` | Предобработка: CLAHE, зелёный канал, медианный blur |
 | `analysis/colony_detector.py` | Детекция чашки и колоний |
@@ -317,12 +437,14 @@ bash scripts/build_nuitka.sh
 | `testing/` | Фреймворк тестирования алгоритмов |
 | `testing/__main__.py` | CLI `test-algorithms` |
 | `testing/interface.py` | ABC для алгоритмов детекции |
-| `testing/registry.py` | Декоратор `@register_algorithm` |
+| `testing/registry.py` | Декоратор `@register_algorithm` + `register_algorithm_instance` |
 | `testing/classic_algorithms.py` | 4 варианта классического алгоритма |
+| `testing/onnx_algorithm.py` | ONNX-адаптер (`OnnxModelAlgorithm`), сканирование встроенных моделей `models/*.onnx` |
 | `testing/dataset.py` | Загрузчик тестовых пар (изображение + GT-маска) |
 | `testing/metrics.py` | IoU, Dice, F1, Precision, Recall |
 | `testing/runner.py` | Прогон алгоритмов и сбор метрик |
 | `testing/dashboard.py` | HTML-отчёт с Chart.js |
+| `models/` | Встроенные ONNX-модели (`*.onnx`), регистрируются при запуске |
 | `train/` | Модуль обучения U-Net |
 | `train/augment.py` | Аугментация (15× на оригинал, albumentations) |
 | `train/config.py` | Гиперпараметры |

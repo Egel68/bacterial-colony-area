@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from .config import TrainingConfig
 from .dataset import make_datasets
@@ -24,6 +25,7 @@ def _train(args):
         lr=args.lr,
         dashboard=args.dashboard,
         dashboard_port=args.dashboard_port,
+        data_root=args.data_root,
     )
 
     if args.dashboard:
@@ -100,6 +102,27 @@ def _train(args):
     log.info("Report: %s", report_path)
 
 
+def _train_compare(args):
+    from .compare import run_train_compare
+
+    cfg = TrainingConfig(
+        model_name=args.architectures.split(",")[0],
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        img_size=args.img_size,
+        lr=args.lr,
+        architectures=tuple(a.strip() for a in args.architectures.split(",")),
+        dashboard=args.dashboard,
+        dashboard_port=args.dashboard_port,
+    )
+    run_train_compare(
+        cfg.architectures,
+        cfg,
+        data_root=args.data_root,
+        eval_root=args.eval_root,
+    )
+
+
 def _list_models(_):
     for name in list_models():
         log.info("  %s", name)
@@ -126,9 +149,31 @@ def main():
     train_parser.add_argument("--img-size", type=int, default=512)
     train_parser.add_argument("--lr", type=float, default=1e-3)
     train_parser.add_argument(
+        "--data-root", default="train/data", help="Training data root"
+    )
+    train_parser.add_argument(
         "--dashboard", action="store_true", help="Enable web dashboard"
     )
     train_parser.add_argument("--dashboard-port", type=int, default=8765)
+
+    compare_parser = sub.add_parser("train-compare", help="Train and compare architectures")
+    compare_parser.add_argument(
+        "--architectures", default="unet,unet_small", help="Comma-separated model names"
+    )
+    compare_parser.add_argument(
+        "--data-root", default=Path("train/data"), help="Training data root"
+    )
+    compare_parser.add_argument(
+        "--eval-root", default=Path("test_images"), help="Test pairs root for evaluation"
+    )
+    compare_parser.add_argument("--epochs", type=int, default=200)
+    compare_parser.add_argument("--batch-size", type=int, default=8)
+    compare_parser.add_argument("--img-size", type=int, default=512)
+    compare_parser.add_argument("--lr", type=float, default=1e-3)
+    compare_parser.add_argument(
+        "--dashboard", action="store_true", help="Enable web dashboard"
+    )
+    compare_parser.add_argument("--dashboard-port", type=int, default=8765)
 
     sub.add_parser("list-models", help="List available models")
     sub.add_parser("dataset-info", help="Show dataset info")
@@ -136,6 +181,8 @@ def main():
     args = parser.parse_args()
     if args.command == "train":
         _train(args)
+    elif args.command == "train-compare":
+        _train_compare(args)
     elif args.command == "list-models":
         _list_models(args)
     elif args.command == "dataset-info":
