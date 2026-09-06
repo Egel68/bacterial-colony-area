@@ -1,0 +1,17 @@
+{
+  "run_id": "2026-09-06_10-24-20",
+  "timestamp": "2026-09-06T07:24:20.750870+00:00",
+  "dataset_path": "test_images",
+  "dataset_size": {
+    "source": 2,
+    "cropped": 1
+  },
+  "algorithms_run": [
+    "ClassicDefault",
+    "ClassicHighSensitivity",
+    "ClassicSolidFill",
+    "ClassicLowSensitivity"
+  ],
+  "git_commit": "01719dc80ed16108ccbfc4ae18fc729bba54809a",
+  "git_message": "docs: add testing and quality evaluation documentation"
+}

@@ -3,6 +3,7 @@ import logging
 
 from .baseline import BaselineDataset, run_baseline, export_json
 from .classic_algorithms import *  # noqa: F401, F403 — triggers @register_algorithm
+from .evaluator import run_evaluate, load_config, EVALUATIONS_DIR
 from .dashboard import generate_report
 from .dataset import TestDataset
 from .onnx_algorithm import OnnxModelAlgorithm
@@ -35,8 +36,8 @@ def main():
     parser.add_argument(
         "--mode",
         default="report",
-        choices=["report", "baseline"],
-        help="Mode: 'report' (default, HTML report) or 'baseline' (JSON baseline metrics)",
+        choices=["report", "baseline", "evaluate"],
+        help="Mode: 'report' (default, HTML report), 'baseline' (JSON baseline metrics), or 'evaluate' (full pipeline with run dir)",
     )
     parser.add_argument(
         "--output", default="test_report.html", help="Output HTML report path"
@@ -75,10 +76,20 @@ def main():
         default=True,
         help="Disable cropped variant processing in baseline mode",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to YAML/JSON config file (evaluate mode)",
+    )
+    parser.add_argument(
+        "--import-root",
+        default=None,
+        help="Import dataset from this root before evaluation (evaluate mode)",
+    )
     args = parser.parse_args()
 
-    if args.mode == "baseline":
-        return _run_baseline(args)
+    if args.mode == "evaluate":
+        return _run_evaluate(args)
     _register_models(args.model)
     algorithms = _parse_algorithms(args.algorithms)
 
@@ -110,6 +121,20 @@ def main():
     log.info("Done.")
 
 
+def _run_evaluate(args):
+    log.info("Evaluate mode")
+    cli_dict = {
+        "data_root": args.data_root,
+        "use_cropped": args.use_cropped,
+        "import_root": args.import_root,
+    }
+    config = load_config(args.config, cli_dict)
+    if args.import_root is not None:
+        config["import_root"] = args.import_root
+    run_evaluate(config)
+    log.info("Evaluation complete")
+
+
 def _run_baseline(args):
     log.info("Baseline mode: %s", args.data_root)
     dataset = BaselineDataset(root=args.data_root)
@@ -124,6 +149,28 @@ def _run_baseline(args):
     result = run_baseline(dataset, use_cropped=args.use_cropped)
     export_json(result, args.output)
     log.info("Baseline report written to %s", args.output)
+
+
+def main_evaluate():
+    """Entry point for `uv run evaluate`. Defaults to evaluate mode."""
+    setup_logging(logging.INFO)
+    parser = argparse.ArgumentParser(description="Run full evaluation pipeline")
+    parser.add_argument("--data-root", default="test_images")
+    parser.add_argument("--no-cropped", dest="use_cropped", action="store_false", default=True)
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--import-root", default=None)
+    args = parser.parse_args()
+    log.info("Evaluate mode")
+    cli_dict = {
+        "data_root": args.data_root,
+        "use_cropped": args.use_cropped,
+        "import_root": args.import_root,
+    }
+    config = load_config(args.config, cli_dict)
+    if args.import_root is not None:
+        config["import_root"] = args.import_root
+    run_evaluate(config)
+    log.info("Evaluation complete")
 
 
 if __name__ == "__main__":

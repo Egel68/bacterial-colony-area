@@ -54,5 +54,9 @@ Thumbs.db
 .opencode/node_modules/
 opencode.json
 
-# Docs
+# Docs (whitelist specific files)
 docs/
+!docs/testing-quality.md
+
+# Evaluation reports (track JSON, ignore regeneratable HTML)
+evaluations/*/report.html
