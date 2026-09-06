@@ -93,6 +93,18 @@ def main():
         default=False,
         help="Clear evaluation cache for the dataset before running",
     )
+    parser.add_argument(
+        "--stats",
+        dest="include_stats",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include enriched statistics in the report (default: true)",
+    )
+    parser.add_argument(
+        "--stats-output",
+        default=None,
+        help="Export full statistics JSON to this path",
+    )
     args = parser.parse_args()
 
     if args.mode == "evaluate":
@@ -123,6 +135,8 @@ def main():
         output_path=args.output,
         include_per_snapshot=args.per_snapshot,
         comparison=comparison,
+        include_stats=args.include_stats,
+        stats_output=args.stats_output,
     )
 
     log.info("Done.")

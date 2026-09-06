@@ -8,7 +8,7 @@ import numpy as np
 
 from .metrics import compute_segmentation_metrics
 from .registry import get_algorithm, list_algorithms, get_algorithm_descriptions
-from .runner import _mean_metrics
+from .runner import compute_detailed_metrics
 
 log = logging.getLogger(__name__)
 
@@ -233,12 +233,12 @@ def run_baseline(dataset: BaselineDataset, use_cropped: bool = True, cache: dict
             entry: dict = {
                 "name": algo_name,
                 "description": desc_map.get(algo_name, ""),
-                "source": _mean_metrics(source_metrics_list),
+                "source": compute_detailed_metrics(source_metrics_list),
             }
             entry["source"]["num_samples"] = len(source_metrics_list)
 
             if use_cropped and cropped_metrics_list:
-                entry["cropped"] = _mean_metrics(cropped_metrics_list)
+                entry["cropped"] = compute_detailed_metrics(cropped_metrics_list)
                 entry["cropped"]["num_samples"] = len(cropped_metrics_list)
 
             cache[algo_name] = entry
