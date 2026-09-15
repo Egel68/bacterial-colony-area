@@ -1,5 +1,7 @@
 import argparse
 import logging
+import time
+from pathlib import Path
 
 from .baseline import BaselineDataset, run_baseline, export_json
 from .cache import clear_cache
@@ -10,6 +12,7 @@ from .dataset import TestDataset
 from .onnx_algorithm import OnnxModelAlgorithm
 from .registry import register_algorithm_instance
 from .runner import run_all, compare_algorithms
+from .telemetry import TelemetryCollector
 from utils.logging import setup_logging
 
 log = logging.getLogger(__name__)
@@ -31,12 +34,12 @@ def _register_models(model_paths: list[str]) -> None:
         log.info("Registered model '%s' from %s", algo.name, path)
 
 
-def main():
+def main(mode_override: str | None = None):
     setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Test colony detection algorithms")
     parser.add_argument(
         "--mode",
-        default="report",
+        default=mode_override or "report",
         choices=["report", "baseline", "evaluate"],
         help="Mode: 'report' (default, HTML report), 'baseline' (JSON baseline metrics), or 'evaluate' (full pipeline with run dir)",
     )
@@ -105,15 +108,45 @@ def main():
         default=None,
         help="Export full statistics JSON to this path",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Maximum number of in-memory algorithm workers",
+    )
+    parser.add_argument(
+        "--cache",
+        dest="use_cache",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable prediction mask caching (default: false)",
+    )
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--memory-budget", type=int, default=None)
+    parser.add_argument("--sample-limit", type=int, default=None)
+    parser.add_argument(
+        "--telemetry",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Write structured performance telemetry",
+    )
+    parser.add_argument("--telemetry-interval", type=float, default=5.0)
+    parser.add_argument("--performance-output", default=None)
     args = parser.parse_args()
 
     if args.mode == "evaluate":
         return _run_evaluate(args)
+    if args.mode == "baseline":
+        return _run_baseline(args)
     _register_models(args.model)
     algorithms = _parse_algorithms(args.algorithms)
 
     log.info("Loading dataset...")
-    dataset = TestDataset(root=args.data_root)
+    dataset = TestDataset(
+        root=args.data_root,
+        sample_limit=args.sample_limit,
+        load_images=False,
+    )
     log.info("Found %d samples", len(dataset))
 
     if len(dataset) == 0:
@@ -121,7 +154,23 @@ def main():
         return
 
     log.info("Running algorithms...")
-    all_results = run_all(dataset, algorithms=algorithms)
+    performance_output = args.performance_output or str(
+        Path(args.output).with_suffix(".performance.json")
+    )
+    telemetry = TelemetryCollector(
+        enabled=args.telemetry,
+        output_path=performance_output,
+        interval=args.telemetry_interval,
+    )
+    all_results = run_all(
+        dataset,
+        algorithms=algorithms,
+        workers=args.workers,
+        use_cache=args.use_cache,
+        batch_size=args.batch_size,
+        memory_budget=args.memory_budget,
+        telemetry=telemetry,
+    )
 
     comparison = None
     if args.compare:
@@ -130,6 +179,7 @@ def main():
         comparison = compare_algorithms(dataset, a, b)
 
     log.info("Generating report...")
+    report_started = time.perf_counter()
     generate_report(
         all_results,
         output_path=args.output,
@@ -138,6 +188,10 @@ def main():
         include_stats=args.include_stats,
         stats_output=args.stats_output,
     )
+    telemetry.record_stage(
+        "report", time.perf_counter() - report_started
+    )
+    telemetry.finish()
 
     log.info("Done.")
 
@@ -150,6 +204,14 @@ def _run_evaluate(args):
         "data_root": args.data_root,
         "use_cropped": args.use_cropped,
         "import_root": args.import_root,
+        "use_cache": args.use_cache,
+        "workers": args.workers,
+        "batch_size": args.batch_size,
+        "memory_budget": args.memory_budget,
+        "sample_limit": args.sample_limit,
+        "telemetry": args.telemetry,
+        "telemetry_interval": args.telemetry_interval,
+        "performance_output": args.performance_output,
     }
     config = load_config(args.config, cli_dict)
     if args.import_root is not None:
@@ -160,7 +222,7 @@ def _run_evaluate(args):
 
 def _run_baseline(args):
     log.info("Baseline mode: %s", args.data_root)
-    dataset = BaselineDataset(root=args.data_root)
+    dataset = BaselineDataset(root=args.data_root, sample_limit=args.sample_limit)
     log.info(
         "Dataset: %d source, %d cropped samples",
         dataset.count_source(),
@@ -169,8 +231,29 @@ def _run_baseline(args):
     if len(dataset) == 0:
         log.warning("No test samples found.")
         return
-    result = run_baseline(dataset, use_cropped=args.use_cropped)
+    performance_output = args.performance_output or str(
+        Path(args.output).with_suffix(".performance.json")
+    )
+    telemetry = TelemetryCollector(
+        enabled=args.telemetry,
+        output_path=performance_output,
+        interval=args.telemetry_interval,
+    )
+    result = run_baseline(
+        dataset,
+        use_cropped=args.use_cropped,
+        workers=args.workers,
+        use_cache=args.use_cache,
+        batch_size=args.batch_size,
+        memory_budget=args.memory_budget,
+        telemetry=telemetry,
+    )
+    report_started = time.perf_counter()
     export_json(result, args.output)
+    telemetry.record_stage(
+        "report", time.perf_counter() - report_started
+    )
+    telemetry.finish()
     log.info("Baseline report written to %s", args.output)
 
 
@@ -183,6 +266,14 @@ def main_evaluate():
     parser.add_argument("--config", default=None)
     parser.add_argument("--import-root", default=None)
     parser.add_argument("--clear-cache", action="store_true", default=False)
+    parser.add_argument("--cache", dest="use_cache", action="store_true", default=False)
+    parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--memory-budget", type=int, default=None)
+    parser.add_argument("--sample-limit", type=int, default=None)
+    parser.add_argument("--telemetry", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--telemetry-interval", type=float, default=5.0)
+    parser.add_argument("--performance-output", default=None)
     args = parser.parse_args()
     log.info("Evaluate mode")
     if args.clear_cache:
@@ -191,6 +282,14 @@ def main_evaluate():
         "data_root": args.data_root,
         "use_cropped": args.use_cropped,
         "import_root": args.import_root,
+        "use_cache": args.use_cache,
+        "workers": args.workers,
+        "batch_size": args.batch_size,
+        "memory_budget": args.memory_budget,
+        "sample_limit": args.sample_limit,
+        "telemetry": args.telemetry,
+        "telemetry_interval": args.telemetry_interval,
+        "performance_output": args.performance_output,
     }
     config = load_config(args.config, cli_dict)
     if args.import_root is not None:
@@ -201,3 +300,8 @@ def main_evaluate():
 
 if __name__ == "__main__":
     main()
+
+
+def main_baseline():
+    """Entry point for the baseline console command."""
+    return main(mode_override="baseline")

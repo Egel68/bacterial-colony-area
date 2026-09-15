@@ -74,6 +74,51 @@ class TestRunAll:
         assert "AlgoA" in results
         assert "AlgoB" not in results
 
+    def test_threaded_runner_reuses_loaded_arrays(self, paired_dataset, monkeypatch):
+        import testing.scheduler as scheduler
+        from testing.dataset import TestDataset
+
+        paired_dataset = TestDataset(
+            root=str(paired_dataset.root),
+            load_images=False,
+        )
+
+        reads = []
+        original = scheduler.cv2.imread
+
+        def counting_imread(*args, **kwargs):
+            reads.append(args[0])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(scheduler.cv2, "imread", counting_imread)
+
+        results = run_all(
+            paired_dataset,
+            algorithms=["AlgoA", "AlgoB"],
+            workers=2,
+            batch_size=1,
+        )
+
+        assert set(results) == {"AlgoA", "AlgoB"}
+        assert len(reads) == 4
+
+    def test_threaded_runner_matches_sequential_results(self, paired_dataset):
+        from testing.runner import _run_algorithm_seq
+        from testing.registry import get_algorithm
+
+        sequential = {
+            name: _run_algorithm_seq(get_algorithm(name), paired_dataset)
+            for name in ("AlgoA", "AlgoB")
+        }
+        parallel = run_all(
+            paired_dataset,
+            algorithms=["AlgoA", "AlgoB"],
+            workers=2,
+            batch_size=1,
+        )
+
+        assert parallel == sequential
+
 
 class TestCompareAlgorithms:
     def test_a_should_beat_b_on_overlap(self, paired_dataset):

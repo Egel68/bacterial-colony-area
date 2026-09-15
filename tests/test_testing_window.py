@@ -66,3 +66,31 @@ def test_worker_without_samples_fails(qtbot, tmp_path):
     worker.run()
     assert failed
     assert "No test samples found" in failed[0]
+
+
+def test_worker_runs_five_object_smoke_dataset(qtbot, tmp_path):
+    import cv2
+    import numpy as np
+
+    for directory in ("source", "masks"):
+        (tmp_path / directory).mkdir()
+    for index in range(5):
+        image = np.full((20, 20, 3), index, dtype=np.uint8)
+        mask = np.zeros((20, 20), dtype=np.uint8)
+        cv2.imwrite(str(tmp_path / "source" / f"s{index}.png"), image)
+        cv2.imwrite(str(tmp_path / "masks" / f"s{index}_mask.png"), mask)
+
+    worker = _RunWorker(
+        str(tmp_path),
+        ["ClassicDefault"],
+        sample_limit=5,
+        batch_size=2,
+    )
+    finished = []
+    failed = []
+    worker.finished.connect(lambda results, extra: finished.append(results))
+    worker.failed.connect(lambda msg: failed.append(msg))
+    worker.run()
+
+    assert not failed
+    assert len(finished[0]["ClassicDefault"]) == 5

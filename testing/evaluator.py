@@ -2,12 +2,14 @@ import argparse
 import json
 import logging
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .baseline import BaselineDataset, run_baseline, export_json
 from .cache import load_cache, save_cache, clear_cache, compute_dataset_signature
 from .classic_algorithms import *  # noqa: F401, F403
+from .telemetry import TelemetryCollector
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +22,14 @@ DEFAULT_CONFIG = {
     "models": [],
     "compare": None,
     "per_snapshot": True,
+    "use_cache": False,
+    "workers": None,
+    "batch_size": 8,
+    "memory_budget": None,
+    "sample_limit": None,
+    "telemetry": False,
+    "telemetry_interval": 5.0,
+    "performance_output": None,
 }
 
 
@@ -254,17 +264,41 @@ def run_evaluate(config: dict) -> str:
         )
 
     log.info("Loading dataset from %s", config["data_root"])
-    dataset = BaselineDataset(root=config["data_root"])
+    dataset = BaselineDataset(
+        root=config["data_root"],
+        sample_limit=config.get("sample_limit"),
+    )
     log.info("Dataset: %d source, %d cropped samples", dataset.count_source(), dataset.count_cropped())
 
     if len(dataset) == 0:
         log.warning("No samples found, aborting")
         return run_id
 
-    cache = load_cache(config["data_root"])
+    cache = (
+        load_cache(config["data_root"])
+        if config.get("sample_limit") is None
+        else None
+    )
     cache_algorithms = cache["algorithms"] if cache else {}
 
-    result = run_baseline(dataset, use_cropped=config.get("use_cropped", True), cache=cache_algorithms)
+    performance_output = config.get("performance_output") or str(
+        run_dir / "performance.json"
+    )
+    telemetry = TelemetryCollector(
+        enabled=config.get("telemetry", False),
+        output_path=performance_output,
+        interval=config.get("telemetry_interval", 5.0),
+    )
+    result = run_baseline(
+        dataset,
+        use_cropped=config.get("use_cropped", True),
+        cache=cache_algorithms,
+        workers=config.get("workers"),
+        use_cache=config.get("use_cache", False),
+        batch_size=config.get("batch_size", 8),
+        memory_budget=config.get("memory_budget"),
+        telemetry=telemetry,
+    )
 
     full_cache = {
         "dataset_root": config["data_root"],
@@ -278,10 +312,15 @@ def run_evaluate(config: dict) -> str:
     result["run_id"] = run_id
     result["git_commit"] = git_info["commit_hash"]
 
+    report_started = time.perf_counter()
     export_json(result, str(run_dir / "report.json"))
 
     html = _generate_eval_html(result, run_id)
     (run_dir / "report.html").write_text(html, encoding="utf-8")
+    telemetry.record_stage(
+        "report", time.perf_counter() - report_started
+    )
+    telemetry.finish()
 
     try:
         import yaml as _yaml
@@ -297,6 +336,7 @@ def run_evaluate(config: dict) -> str:
         "dataset_path": config["data_root"],
         "dataset_size": {"source": dataset.count_source(), "cropped": dataset.count_cropped()},
         "algorithms_run": [a["name"] for a in result.get("algorithms", [])],
+        "sample_limit": config.get("sample_limit"),
         "git_commit": git_info["commit_hash"],
         "git_message": git_info["commit_message"],
     }

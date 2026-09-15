@@ -672,6 +672,9 @@ def generate_report(
     include_outliers: bool = True,
     stats_output: str | None = None,
 ):
+    if not include_per_snapshot:
+        include_scatter = False
+
     # Если stats отключены — отключаем все расширения
     if not include_stats:
         include_boxplots = False

@@ -7,6 +7,8 @@ from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
 from .metrics import compute_segmentation_metrics
 from .registry import list_algorithms, get_algorithm, get_algorithm_descriptions
+from .scheduler import execute_pipeline
+from .telemetry import TelemetryCollector
 from .statistics import (
     compute_descriptive,
     wilcoxon_signed_rank,
@@ -67,48 +69,68 @@ def compute_detailed_metrics(metrics_list: List[Dict[str, float]]) -> Dict[str, 
     return result
 
 
-def run_algorithm(
+def _run_algorithm_seq(
     algo: BaseDetectionAlgorithm,
     dataset: TestDataset,
 ) -> AlgorithmResults:
+    """Sequential run for one algorithm (kept for backward compat / compare_algorithms)."""
     results: AlgorithmResults = {}
-
     for sample in dataset:
         sample_key = sample.name
         results[sample_key] = {}
-
         source_mask_pred = algo.detect(sample.source_image, is_cropped=False)
         source_metrics = compute_segmentation_metrics(
             source_mask_pred, sample.source_mask
         )
         results[sample_key]["source"] = source_metrics
-
         if sample.cropped_image is not None and sample.cropped_mask is not None:
             cropped_mask_pred = algo.detect(sample.cropped_image, is_cropped=True)
             cropped_metrics = compute_segmentation_metrics(
                 cropped_mask_pred, sample.cropped_mask
             )
             results[sample_key]["cropped"] = cropped_metrics
-
     return results
 
 
-def run_all(dataset: TestDataset, algorithms: Optional[List[str]] = None) -> AllResults:
-    """Прогоняет весь реестр (или указанное подмножество) по датасету."""
-    all_results: AllResults = {}
+def run_algorithm(
+    algo: BaseDetectionAlgorithm,
+    dataset: TestDataset,
+) -> AlgorithmResults:
+    """Run one algorithm sequentially for compatibility and comparisons."""
+    return _run_algorithm_seq(algo, dataset)
 
+
+def run_all(
+    dataset: TestDataset,
+    algorithms: Optional[List[str]] = None,
+    workers: Optional[int] = None,
+    use_cache: bool = False,
+    batch_size: int = 8,
+    memory_budget: int | None = None,
+    telemetry: TelemetryCollector | None = None,
+) -> AllResults:
+    """Прогоняет выбранные алгоритмы по bounded in-memory batch-ам."""
     if algorithms is None:
         names = list_algorithms()
     else:
         names = algorithms
-
-    for algo_name in names:
-        algo = get_algorithm(algo_name)
-        log.info("Running: %s", algo_name)
-        results = run_algorithm(algo, dataset)
-        all_results[algo_name] = results
-
-    return all_results
+    if not names:
+        return {}
+    log.info(
+        "Running %d algorithm(s) with workers=%s, batch_size=%d",
+        len(names),
+        workers or "auto",
+        batch_size,
+    )
+    return execute_pipeline(
+        dataset,
+        names,
+        workers=workers,
+        batch_size=batch_size,
+        memory_budget=memory_budget,
+        use_cache=use_cache,
+        telemetry=telemetry,
+    )
 
 
 def compare_algorithms(
@@ -119,11 +141,9 @@ def compare_algorithms(
     Возвращает вложенный словарь:
       comparison[metric][sample_key][variant] = "a" | "b" | "tie"
     """
-    algo_a = get_algorithm(name_a)
-    algo_b = get_algorithm(name_b)
-
-    results_a = run_algorithm(algo_a, dataset)
-    results_b = run_algorithm(algo_b, dataset)
+    compared = execute_pipeline(dataset, [name_a, name_b], workers=1)
+    results_a = compared.get(name_a, {})
+    results_b = compared.get(name_b, {})
 
     comparison: Dict[str, Dict[str, Dict[str, str]]] = {}
     metric_names = ["iou", "dice", "f1", "precision", "recall", "accuracy"]

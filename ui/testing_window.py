@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QSpinBox,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -35,6 +36,7 @@ from testing.registry import (
     register_algorithm_instance,
 )
 from testing.runner import run_all, compare_algorithms
+from testing.telemetry import TelemetryCollector
 
 
 class _RunWorker(QObject):
@@ -43,22 +45,54 @@ class _RunWorker(QObject):
     finished = pyqtSignal(dict, dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, data_root: str, algorithm_names: list[str], compare_pair=None):
+    def __init__(
+        self,
+        data_root: str,
+        algorithm_names: list[str],
+        compare_pair=None,
+        sample_limit: int | None = None,
+        batch_size: int = 8,
+        workers: int | None = None,
+        telemetry: bool = False,
+    ):
         super().__init__()
         self.data_root = data_root
         self.algorithm_names = algorithm_names
         self.compare_pair = compare_pair
+        self.sample_limit = sample_limit
+        self.batch_size = batch_size
+        self.workers = workers
+        self.telemetry_enabled = telemetry
 
     def run(self):
         try:
-            dataset = TestDataset(root=self.data_root)
+            dataset = TestDataset(
+                root=self.data_root,
+                sample_limit=self.sample_limit,
+                load_images=False,
+            )
             if len(dataset) == 0:
                 self.failed.emit(
                     "No test samples found. Пополните датасет парами изображение + маска."
                 )
                 return
 
-            all_results = run_all(dataset, algorithms=self.algorithm_names)
+            performance_output = (
+                str(Path(self.data_root) / "performance.json")
+                if self.telemetry_enabled
+                else None
+            )
+            telemetry = TelemetryCollector(
+                enabled=self.telemetry_enabled,
+                output_path=performance_output,
+            )
+            all_results = run_all(
+                dataset,
+                algorithms=self.algorithm_names,
+                workers=self.workers,
+                batch_size=self.batch_size,
+                telemetry=telemetry,
+            )
 
             comparison = None
             if self.compare_pair:
@@ -159,6 +193,22 @@ class TestingWindow(QMainWindow):
         self.chk_per_snapshot = QCheckBox("Детализация по снимкам")
         self.chk_per_snapshot.setChecked(True)
         params_layout.addWidget(self.chk_per_snapshot)
+
+        tuning_row = QHBoxLayout()
+        tuning_row.addWidget(QLabel("Batch:"))
+        self.batch_size_input = QSpinBox()
+        self.batch_size_input.setRange(1, 512)
+        self.batch_size_input.setValue(8)
+        tuning_row.addWidget(self.batch_size_input)
+        tuning_row.addWidget(QLabel("Объектов:"))
+        self.sample_limit_input = QSpinBox()
+        self.sample_limit_input.setRange(0, 1000000)
+        self.sample_limit_input.setSpecialValueText("все")
+        tuning_row.addWidget(self.sample_limit_input)
+        self.chk_telemetry = QCheckBox("Telemetry")
+        tuning_row.addWidget(self.chk_telemetry)
+        tuning_row.addStretch()
+        params_layout.addLayout(tuning_row)
 
         compare_row = QHBoxLayout()
         compare_row.addWidget(QLabel("Парное сравнение:"))
@@ -292,7 +342,15 @@ class TestingWindow(QMainWindow):
         self.status_label.setText("Запуск прогона…")
 
         self._thread = QThread(self)
-        self._worker = _RunWorker(data_root, names, compare_pair)
+        sample_limit = self.sample_limit_input.value() or None
+        self._worker = _RunWorker(
+            data_root,
+            names,
+            compare_pair,
+            sample_limit=sample_limit,
+            batch_size=self.batch_size_input.value(),
+            telemetry=self.chk_telemetry.isChecked(),
+        )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_finished)
