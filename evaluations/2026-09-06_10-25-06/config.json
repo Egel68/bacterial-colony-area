@@ -1,0 +1,8 @@
+{
+  "data_root": "test_images",
+  "use_cropped": true,
+  "algorithms": null,
+  "models": [],
+  "compare": null,
+  "per_snapshot": true
+}

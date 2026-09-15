@@ -21,3 +21,4 @@ def list_models() -> list[str]:
 
 
 from .unet import UNet as UNet  # noqa: E402, F401 — triggers @register_model
+from .unet_small import UNetSmall as UNetSmall  # noqa: E402, F401 — triggers @register_model

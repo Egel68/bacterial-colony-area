@@ -126,7 +126,7 @@ def run_training(
         for k, v in val_metrics.items():
             writer.add_scalar(f"val/{k}", v, epoch)
 
-        if val_metrics["iou"] > best_iou:
+        if best_state is None or val_metrics["iou"] > best_iou:
             best_iou = val_metrics["iou"]
             best_epoch = epoch
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}

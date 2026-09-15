@@ -20,6 +20,7 @@ main.onefile-build/
 
 # Generated training data
 train/data/
+train/runs/
 train/runs/**/*.pt
 train/runs/**/*.onnx.data
 train/runs/**/tensorboard/
@@ -27,6 +28,9 @@ train/runs/**/report.html
 
 # Test reports
 test_report.html
+
+# Generated datasets
+datasets/*_imported/
 coverage/
 .coverage
 coverage.xml
@@ -50,5 +54,9 @@ Thumbs.db
 .opencode/node_modules/
 opencode.json
 
-# Docs
+# Docs (whitelist specific files)
 docs/
+!docs/testing-quality.md
+
+# Evaluation reports (track JSON, ignore regeneratable HTML)
+evaluations/*/report.html

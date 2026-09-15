@@ -17,11 +17,13 @@ from PyQt6.QtWidgets import QApplication
 from ui.main_window import MainWindow
 from ui.styles import get_application_style
 from utils.logging import setup_logging
+from testing.onnx_algorithm import register_bundled_models
 
 
 def main():
     """Главная функция запуска приложения."""
     setup_logging()
+    register_bundled_models()
 
     # Включаем поддержку High DPI
     QApplication.setHighDpiScaleFactorRoundingPolicy(
