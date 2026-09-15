@@ -13,10 +13,17 @@ from .telemetry import TelemetryCollector
 
 log = logging.getLogger(__name__)
 
+
 class BaselineSample:
     __test__ = False
 
-    def __init__(self, name: str, image_path: Path, mask_path: Path, variant: Literal["source", "cropped"]):
+    def __init__(
+        self,
+        name: str,
+        image_path: Path,
+        mask_path: Path,
+        variant: Literal["source", "cropped"],
+    ):
         self.name = name
         self.image_path = image_path
         self.mask_path = mask_path
@@ -39,7 +46,11 @@ def _detect_structure(root: Path) -> DetectedStructure:
         return "legacy"
     if (root / "source").is_dir():
         source_dir = root / "source"
-        files = [p for p in source_dir.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
+        files = [
+            p
+            for p in source_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+        ]
         for f in files:
             mask_candidate = source_dir / f"{f.stem}_mask{f.suffix}"
             if mask_candidate.exists():
@@ -94,7 +105,10 @@ class BaselineDataset:
 
         source_count = 0
         for source_path in sorted(source_dir.iterdir()):
-            if not source_path.is_file() or source_path.suffix.lower() not in SUPPORTED_EXTS:
+            if (
+                not source_path.is_file()
+                or source_path.suffix.lower() not in SUPPORTED_EXTS
+            ):
                 continue
             stem = source_path.stem
             ext = source_path.suffix
@@ -102,24 +116,28 @@ class BaselineDataset:
             if not mask_path.exists():
                 continue
             source_count += 1
-            self._samples.append(BaselineSample(
-                name=stem,
-                image_path=source_path,
-                mask_path=mask_path,
-                variant="source",
-            ))
+            self._samples.append(
+                BaselineSample(
+                    name=stem,
+                    image_path=source_path,
+                    mask_path=mask_path,
+                    variant="source",
+                )
+            )
             if self.sample_limit is not None and source_count >= self.sample_limit:
                 break
 
             cropped_path = cropped_dir / f"{stem}_cropped{ext}"
             cropped_mask_path = cropped_masks_dir / f"{stem}_cropped_mask{ext}"
             if cropped_path.exists() and cropped_mask_path.exists():
-                self._samples.append(BaselineSample(
-                    name=f"{stem}_cropped",
-                    image_path=cropped_path,
-                    mask_path=cropped_mask_path,
-                    variant="cropped",
-                ))
+                self._samples.append(
+                    BaselineSample(
+                        name=f"{stem}_cropped",
+                        image_path=cropped_path,
+                        mask_path=cropped_mask_path,
+                        variant="cropped",
+                    )
+                )
 
     def _load_importer(self):
         source_dir = self.root / "source"
@@ -140,34 +158,44 @@ class BaselineDataset:
             if not mask_path.exists():
                 continue
             source_count += 1
-            self._samples.append(BaselineSample(
-                name=stem,
-                image_path=source_path,
-                mask_path=mask_path,
-                variant="source",
-            ))
+            self._samples.append(
+                BaselineSample(
+                    name=stem,
+                    image_path=source_path,
+                    mask_path=mask_path,
+                    variant="source",
+                )
+            )
             selected_source_names.add(stem)
             if self.sample_limit is not None and source_count >= self.sample_limit:
                 break
 
         if cropped_dir.is_dir() and (self.sample_limit is None or source_count):
             for cropped_path in sorted(cropped_dir.iterdir()):
-                if not cropped_path.is_file() or cropped_path.suffix.lower() not in SUPPORTED_EXTS:
+                if (
+                    not cropped_path.is_file()
+                    or cropped_path.suffix.lower() not in SUPPORTED_EXTS
+                ):
                     continue
                 stem = cropped_path.stem
                 source_stem = stem.removesuffix("_cropped")
-                if self.sample_limit is not None and source_stem not in selected_source_names:
+                if (
+                    self.sample_limit is not None
+                    and source_stem not in selected_source_names
+                ):
                     continue
                 ext = cropped_path.suffix
                 mask_path = cropped_dir / f"{stem}_mask{ext}"
                 if not mask_path.exists():
                     continue
-                self._samples.append(BaselineSample(
-                    name=stem,
-                    image_path=cropped_path,
-                    mask_path=mask_path,
-                    variant="cropped",
-                ))
+                self._samples.append(
+                    BaselineSample(
+                        name=stem,
+                        image_path=cropped_path,
+                        mask_path=mask_path,
+                        variant="cropped",
+                    )
+                )
 
     def _load_manifest(self):
         import json
@@ -188,12 +216,14 @@ class BaselineDataset:
             mask_path = self.root / mask_rel
             if not image_path.is_file() or not mask_path.is_file():
                 continue
-            self._samples.append(BaselineSample(
-                name=entry["id"],
-                image_path=image_path,
-                mask_path=mask_path,
-                variant=kind,
-            ))
+            self._samples.append(
+                BaselineSample(
+                    name=entry["id"],
+                    image_path=image_path,
+                    mask_path=mask_path,
+                    variant=kind,
+                )
+            )
             selected_source_ids.add(entry["id"])
             source_count += 1
             if self.sample_limit is not None and source_count >= self.sample_limit:
@@ -211,18 +241,22 @@ class BaselineDataset:
             mask_path = self.root / mask_rel
             if not image_path.is_file() or not mask_path.is_file():
                 continue
-            self._samples.append(BaselineSample(
-                name=entry["id"],
-                image_path=image_path,
-                mask_path=mask_path,
-                variant="cropped",
-            ))
+            self._samples.append(
+                BaselineSample(
+                    name=entry["id"],
+                    image_path=image_path,
+                    mask_path=mask_path,
+                    variant="cropped",
+                )
+            )
 
     @property
     def samples(self) -> list[BaselineSample]:
         return list(self._samples)
 
-    def samples_by_variant(self, variant: Literal["source", "cropped"]) -> list[BaselineSample]:
+    def samples_by_variant(
+        self, variant: Literal["source", "cropped"]
+    ) -> list[BaselineSample]:
         return [s for s in self._samples if s.variant == variant]
 
     def count_source(self) -> int:
@@ -258,7 +292,10 @@ def run_baseline(
 
     result: dict = {
         "dataset_name": dataset.root.name,
-        "image_count": {"source": dataset.count_source(), "cropped": dataset.count_cropped() if use_cropped else 0},
+        "image_count": {
+            "source": dataset.count_source(),
+            "cropped": dataset.count_cropped() if use_cropped else 0,
+        },
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "algorithms": [],
     }
@@ -266,10 +303,15 @@ def run_baseline(
     if cache is None:
         cache = {}
     if dataset.sample_limit is not None and cache:
-        log.info("Ignoring aggregate cache for limited dataset (%d samples)", dataset.sample_limit)
+        log.info(
+            "Ignoring aggregate cache for limited dataset (%d samples)",
+            dataset.sample_limit,
+        )
         cache = {}
     if cache:
-        log.info("Cache provided with %d algorithm(s): %s", len(cache), list(cache.keys()))
+        log.info(
+            "Cache provided with %d algorithm(s): %s", len(cache), list(cache.keys())
+        )
 
     uncached_names = [n for n in algo_names if n not in cache]
 

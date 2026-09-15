@@ -116,7 +116,9 @@ class LabelingAdapter(BaseAdapter):
             )
 
         for image_path in _image_files(root / "cropped"):
-            mask_path = root / "cropped_masks" / f"{image_path.stem}_mask{image_path.suffix}"
+            mask_path = (
+                root / "cropped_masks" / f"{image_path.stem}_mask{image_path.suffix}"
+            )
             if not mask_path.is_file():
                 continue
             samples.append(
@@ -346,7 +348,9 @@ class CocoBboxImporter(BaseAdapter):
             + (np.arange(image.shape[1])[None, :] - cx) ** 2
             > r * r
         ] = 0
-        crop_mask = cv2.bitwise_and(mask, mask, mask=self._circle_mask(image.shape, dish))
+        crop_mask = cv2.bitwise_and(
+            mask, mask, mask=self._circle_mask(image.shape, dish)
+        )
 
         rel_img = Path(SampleKind.CROPPED.value) / f"{stem}_cropped.jpg"
         rel_mask = Path(SampleKind.CROPPED.value) / f"{stem}_cropped_mask.png"
@@ -357,9 +361,7 @@ class CocoBboxImporter(BaseAdapter):
     @staticmethod
     def _circle_mask(shape: tuple[int, int], dish: dict) -> np.ndarray:
         mask = np.zeros(shape[:2], dtype=np.uint8)
-        cv2.circle(
-            mask, (dish["cx"], dish["cy"]), dish["r"], 255, thickness=-1
-        )
+        cv2.circle(mask, (dish["cx"], dish["cy"]), dish["r"], 255, thickness=-1)
         return mask
 
     def _write_dataset_json(self, out: Path, manifest: DatasetManifest) -> None:

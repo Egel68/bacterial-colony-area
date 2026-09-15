@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 
@@ -49,9 +49,7 @@ def detect_outliers(
     return outliers
 
 
-def wilcoxon_signed_rank(
-    a: List[float], b: List[float]
-) -> Dict:
+def wilcoxon_signed_rank(a: List[float], b: List[float]) -> Dict:
     if len(a) != len(b):
         raise ValueError("Arrays must have same length")
     diffs = np.array(a, dtype=float) - np.array(b, dtype=float)
@@ -74,9 +72,7 @@ def wilcoxon_signed_rank(
     tie_counts = np.unique(np.abs(non_zero), return_counts=True)[1]
     if len(tie_counts) > 0 and np.any(tie_counts > 1):
         tie_correction = sum(t**3 - t for t in tie_counts[tie_counts > 1]) / 48
-        sigma = math.sqrt(
-            n * (n + 1) * (2 * n + 1) / 24 - tie_correction
-        )
+        sigma = math.sqrt(n * (n + 1) * (2 * n + 1) / 24 - tie_correction)
     if sigma == 0:
         z = 0.0
     else:

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .baseline import BaselineDataset, run_baseline, export_json
-from .cache import load_cache, save_cache, clear_cache, compute_dataset_signature
+from .cache import load_cache, save_cache, compute_dataset_signature
 from .classic_algorithms import *  # noqa: F401, F403
 from .telemetry import TelemetryCollector
 
@@ -36,6 +36,7 @@ DEFAULT_CONFIG = {
 def _load_yaml_or_json(path: Path) -> dict:
     try:
         import yaml
+
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except ImportError:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -75,11 +76,17 @@ def get_git_info() -> dict:
     try:
         hash_ = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True, cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).resolve().parent.parent,
         ).stdout.strip()
         msg = subprocess.run(
             ["git", "log", "-1", "--format=%s"],
-            capture_output=True, text=True, check=True, cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).resolve().parent.parent,
         ).stdout.strip()
         return {"commit_hash": hash_, "commit_message": msg}
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -254,6 +261,7 @@ def run_evaluate(config: dict) -> str:
     if config.get("import_root"):
         from pathlib import Path as _Path
         from train.dataset_adapters import CocoBboxImporter
+
         import_root = _Path(config["import_root"])
         data_root = _Path(config["data_root"])
         log.info("Importing dataset from %s to %s", import_root, data_root)
@@ -268,16 +276,18 @@ def run_evaluate(config: dict) -> str:
         root=config["data_root"],
         sample_limit=config.get("sample_limit"),
     )
-    log.info("Dataset: %d source, %d cropped samples", dataset.count_source(), dataset.count_cropped())
+    log.info(
+        "Dataset: %d source, %d cropped samples",
+        dataset.count_source(),
+        dataset.count_cropped(),
+    )
 
     if len(dataset) == 0:
         log.warning("No samples found, aborting")
         return run_id
 
     cache = (
-        load_cache(config["data_root"])
-        if config.get("sample_limit") is None
-        else None
+        load_cache(config["data_root"]) if config.get("sample_limit") is None else None
     )
     cache_algorithms = cache["algorithms"] if cache else {}
 
@@ -317,30 +327,39 @@ def run_evaluate(config: dict) -> str:
 
     html = _generate_eval_html(result, run_id)
     (run_dir / "report.html").write_text(html, encoding="utf-8")
-    telemetry.record_stage(
-        "report", time.perf_counter() - report_started
-    )
+    telemetry.record_stage("report", time.perf_counter() - report_started)
     telemetry.finish()
 
     try:
         import yaml as _yaml
+
         config_copy = Path(run_dir / "config.yaml")
-        config_copy.write_text(_yaml.safe_dump(config, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+        config_copy.write_text(
+            _yaml.safe_dump(config, allow_unicode=True, default_flow_style=False),
+            encoding="utf-8",
+        )
     except ImportError:
         config_copy = Path(run_dir / "config.json")
-        config_copy.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+        config_copy.write_text(
+            json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
     run_info = {
         "run_id": run_id,
         "timestamp": result.get("timestamp", ""),
         "dataset_path": config["data_root"],
-        "dataset_size": {"source": dataset.count_source(), "cropped": dataset.count_cropped()},
+        "dataset_size": {
+            "source": dataset.count_source(),
+            "cropped": dataset.count_cropped(),
+        },
         "algorithms_run": [a["name"] for a in result.get("algorithms", [])],
         "sample_limit": config.get("sample_limit"),
         "git_commit": git_info["commit_hash"],
         "git_message": git_info["commit_message"],
     }
-    (run_dir / "run_info.json").write_text(json.dumps(run_info, indent=2, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "run_info.json").write_text(
+        json.dumps(run_info, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     log.info("Evaluation complete: %s", run_dir)
     return run_id

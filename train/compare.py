@@ -32,9 +32,7 @@ def _mean_per_variant(metrics_rows: list[dict]) -> dict[str, float]:
     return result
 
 
-def evaluate_onnx_on_testset(
-    onnx_path: str, eval_root: Path
-) -> dict[str, object]:
+def evaluate_onnx_on_testset(onnx_path: str, eval_root: Path) -> dict[str, object]:
     """Оценка одной ONNX-модели на тестовых парах и усреднение метрик.
 
     Возвращает `{"mean": {...}, "n_snapshots": int}`.
@@ -103,7 +101,9 @@ def _write_reports(summary: dict[str, object], compare_dir: Path) -> None:
     compare_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = compare_dir / "compare.json"
-    json_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     html_path = compare_dir / "compare.html"
     html_path.write_text(_render_html(summary), encoding="utf-8")

@@ -7,12 +7,11 @@ from typing import Dict, List
 from .runner import (
     AllResults,
     compute_all_winners,
-    compute_detailed_metrics,
     compute_outlier_table,
     compute_summary,
     compute_wilcoxon_table,
 )
-from .statistics import compute_descriptive, detect_outliers
+from .statistics import detect_outliers
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +123,6 @@ def _build_boxplot_data(summary: List[Dict]) -> str:
         metric_data: Dict = {}
         for entry in summary:
             algo_name = entry["name"]
-            vals = []
             # We don't have per-sample values in summary, so outlier detection
             # is approximate; the scatter chart has exact outliers.
             metric_data[algo_name] = {
@@ -157,13 +155,7 @@ def _build_scatter_data(all_results: AllResults) -> str:
                     vals.append(val)
                     meta.append((sample_key, variant_key))
             if vals:
-                desc = compute_descriptive(vals)
-                mean_v = desc["mean"]
-                std_v = desc["std"]
-                outlier_vals = {
-                    o["value"]
-                    for o in detect_outliers(vals)
-                }
+                outlier_vals = {o["value"] for o in detect_outliers(vals)}
                 for (sk, vk), val in zip(meta, vals):
                     points.append(
                         {
@@ -190,7 +182,7 @@ def _build_significance_section(wilcoxon_table: Dict) -> str:
             }
             interp = interp_map.get(result["interpretation"], "—")
             rows += f"""<tr>
-  <td>{pair_key.replace(' vs ', '</b> vs <b>')}</td>
+  <td>{pair_key.replace(" vs ", "</b> vs <b>")}</td>
   <td class="num">{p_str}</td>
   <td>{interp}</td>
 </tr>\n"""
@@ -220,9 +212,9 @@ def _build_winner_table(all_winners: Dict) -> str:
             rows += f"""<tr>
   <td><b>{a}</b></td>
   <td><b>{b}</b></td>
-  <td class="num">{fractions['a_wins']:.1%}</td>
-  <td class="num">{fractions['b_wins']:.1%}</td>
-  <td class="num">{fractions['ties']:.1%}</td>
+  <td class="num">{fractions["a_wins"]:.1%}</td>
+  <td class="num">{fractions["b_wins"]:.1%}</td>
+  <td class="num">{fractions["ties"]:.1%}</td>
 </tr>\n"""
         sections += f"""<h2>Доля побед по снимкам: {metric_label(metric_name)}</h2>
 <table class="winner-table">
@@ -249,12 +241,12 @@ def _build_outlier_table(outliers: List[Dict]) -> str:
     rows = ""
     for o in outliers:
         rows += f"""<tr>
-  <td>{o['algorithm']}</td>
-  <td>{metric_label(o['metric'])}</td>
-  <td>{o['sample']}</td>
-  <td>{o['variant']}</td>
-  <td class="num">{o['value']:.4f}</td>
-  <td class="num">{o['z_score']:.2f}</td>
+  <td>{o["algorithm"]}</td>
+  <td>{metric_label(o["metric"])}</td>
+  <td>{o["sample"]}</td>
+  <td>{o["variant"]}</td>
+  <td class="num">{o["value"]:.4f}</td>
+  <td class="num">{o["z_score"]:.2f}</td>
 </tr>\n"""
     return f"""<h2>Выбросы (|z| > 3σ)</h2>
 <details>
@@ -718,7 +710,7 @@ def generate_report(
 
     if include_boxplots:
         boxplot_data = _build_boxplot_data(summary)
-        boxplot_sections = f"""<div class="chart-container">
+        boxplot_sections = """<div class="chart-container">
   <h3>Distribution (Box-Plot)</h3>
   <div class="boxplot-grid">
     <div class="boxplot-chart"><canvas id="boxplot_iou"></canvas></div>
@@ -735,7 +727,7 @@ def generate_report(
 
     if include_scatter:
         scatter_data = _build_scatter_data(all_results)
-        scatter_sections = f"""<div class="chart-container">
+        scatter_sections = """<div class="chart-container">
   <h3>Per-Sample Distribution (Scatter)</h3>
   <div class="scatter-grid">
     <div class="scatter-chart"><canvas id="scatter_iou"></canvas></div>

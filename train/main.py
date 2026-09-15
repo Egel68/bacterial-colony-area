@@ -156,7 +156,9 @@ def main():
     )
     train_parser.add_argument("--dashboard-port", type=int, default=8765)
 
-    compare_parser = sub.add_parser("train-compare", help="Train and compare architectures")
+    compare_parser = sub.add_parser(
+        "train-compare", help="Train and compare architectures"
+    )
     compare_parser.add_argument(
         "--architectures", default="unet,unet_small", help="Comma-separated model names"
     )
@@ -164,7 +166,9 @@ def main():
         "--data-root", default=Path("train/data"), help="Training data root"
     )
     compare_parser.add_argument(
-        "--eval-root", default=Path("test_images"), help="Test pairs root for evaluation"
+        "--eval-root",
+        default=Path("test_images"),
+        help="Test pairs root for evaluation",
     )
     compare_parser.add_argument("--epochs", type=int, default=200)
     compare_parser.add_argument("--batch-size", type=int, default=8)

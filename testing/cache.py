@@ -150,6 +150,7 @@ class PredictionCache:
     ) -> np.ndarray | None:
         """Return cached mask as uint8 array, or None if not found."""
         import cv2
+
         digest = self._hash(image_path, algo_name, params)
         if not digest:
             return None
@@ -184,6 +185,7 @@ class PredictionCache:
     ) -> None:
         """Store mask in cache."""
         import cv2
+
         digest = self._hash(image_path, algo_name, params)
         if not digest:
             return
@@ -215,5 +217,6 @@ class PredictionCache:
         target = self.root / algo_name if algo_name else self.root
         if target.is_dir():
             import shutil
+
             shutil.rmtree(target)
             log.info("Cleared prediction cache: %s", target)

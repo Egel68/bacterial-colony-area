@@ -83,7 +83,9 @@ class TestDataset:
             cropped_mask_path = None
 
             cropped_path_candidate = self.cropped_dir / f"{stem}_cropped{ext}"
-            cropped_mask_path_candidate = self.cropped_masks_dir / f"{stem}_cropped_mask{ext}"
+            cropped_mask_path_candidate = (
+                self.cropped_masks_dir / f"{stem}_cropped_mask{ext}"
+            )
 
             if cropped_path_candidate.exists() and cropped_mask_path_candidate.exists():
                 if self.load_images:

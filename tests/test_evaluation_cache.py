@@ -1,7 +1,3 @@
-from pathlib import Path
-
-import pytest
-
 from testing.cache import compute_dataset_signature
 
 
@@ -19,7 +15,7 @@ def test_signature_changes():
 
 
 def test_cache_roundtrip(tmp_path):
-    from testing.cache import load_cache, save_cache, compute_dataset_signature
+    from testing.cache import load_cache, save_cache
 
     test_data = {
         "dataset_root": str(tmp_path),

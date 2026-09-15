@@ -296,7 +296,9 @@ def execute_pipeline(
                 try:
                     metrics = future.result()
                 except Exception as exc:
-                    log.error("Task failed: %s/%s/%s: %s", name, sample_name, variant, exc)
+                    log.error(
+                        "Task failed: %s/%s/%s: %s", name, sample_name, variant, exc
+                    )
                     telemetry.record_task(failed=1)
                     telemetry.record_error(f"{name}/{sample_name}/{variant}: {exc}")
                     continue
@@ -330,8 +332,7 @@ def execute_pipeline(
     return {
         name: {
             sample_name: {
-                variant: sample_results[variant]
-                for variant in sorted(sample_results)
+                variant: sample_results[variant] for variant in sorted(sample_results)
             }
             for sample_name, sample_results in sorted(results[name].items())
         }
@@ -349,9 +350,7 @@ def _should_reduce_workers(
     queue = telemetry._latencies.get("queue_wait", [])
     detect = telemetry._latencies.get("detect", [])
     return (
-        len(queue) >= 2
-        and len(detect) >= 2
-        and sum(queue[-2:]) > sum(detect[-2:]) * 2
+        len(queue) >= 2 and len(detect) >= 2 and sum(queue[-2:]) > sum(detect[-2:]) * 2
     )
 
 

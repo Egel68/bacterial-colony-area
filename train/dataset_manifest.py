@@ -103,9 +103,13 @@ class DatasetManifest:
             image_path = (data_root / sample.image).resolve()
             mask_path = (data_root / sample.mask).resolve()
             if not image_path.is_file():
-                raise ValueError(f"Missing image file for sample '{sample.id}': {image_path}")
+                raise ValueError(
+                    f"Missing image file for sample '{sample.id}': {image_path}"
+                )
             if not mask_path.is_file():
-                raise ValueError(f"Missing mask file for sample '{sample.id}': {mask_path}")
+                raise ValueError(
+                    f"Missing mask file for sample '{sample.id}': {mask_path}"
+                )
 
 
 def validate_mask_mode(mask_mode: str, allow_multiclass: bool = False) -> None:

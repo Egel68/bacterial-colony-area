@@ -6,7 +6,7 @@ from pathlib import Path
 from .baseline import BaselineDataset, run_baseline, export_json
 from .cache import clear_cache
 from .classic_algorithms import *  # noqa: F401, F403 — triggers @register_algorithm
-from .evaluator import run_evaluate, load_config, EVALUATIONS_DIR
+from .evaluator import run_evaluate, load_config
 from .dashboard import generate_report
 from .dataset import TestDataset
 from .onnx_algorithm import OnnxModelAlgorithm
@@ -188,9 +188,7 @@ def main(mode_override: str | None = None):
         include_stats=args.include_stats,
         stats_output=args.stats_output,
     )
-    telemetry.record_stage(
-        "report", time.perf_counter() - report_started
-    )
+    telemetry.record_stage("report", time.perf_counter() - report_started)
     telemetry.finish()
 
     log.info("Done.")
@@ -250,9 +248,7 @@ def _run_baseline(args):
     )
     report_started = time.perf_counter()
     export_json(result, args.output)
-    telemetry.record_stage(
-        "report", time.perf_counter() - report_started
-    )
+    telemetry.record_stage("report", time.perf_counter() - report_started)
     telemetry.finish()
     log.info("Baseline report written to %s", args.output)
 
@@ -262,7 +258,9 @@ def main_evaluate():
     setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Run full evaluation pipeline")
     parser.add_argument("--data-root", default="test_images")
-    parser.add_argument("--no-cropped", dest="use_cropped", action="store_false", default=True)
+    parser.add_argument(
+        "--no-cropped", dest="use_cropped", action="store_false", default=True
+    )
     parser.add_argument("--config", default=None)
     parser.add_argument("--import-root", default=None)
     parser.add_argument("--clear-cache", action="store_true", default=False)
@@ -271,7 +269,9 @@ def main_evaluate():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--memory-budget", type=int, default=None)
     parser.add_argument("--sample-limit", type=int, default=None)
-    parser.add_argument("--telemetry", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--telemetry", action=argparse.BooleanOptionalAction, default=False
+    )
     parser.add_argument("--telemetry-interval", type=float, default=5.0)
     parser.add_argument("--performance-output", default=None)
     args = parser.parse_args()

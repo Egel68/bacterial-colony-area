@@ -8,7 +8,9 @@ import torch
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Re-export best.pt to a single-file ONNX")
+    parser = argparse.ArgumentParser(
+        description="Re-export best.pt to a single-file ONNX"
+    )
     parser.add_argument("--checkpoint", required=True, help="Path to best.pt")
     parser.add_argument("--output", required=True, help="Output .onnx path")
     parser.add_argument("--model", default="unet", help="Model architecture name")

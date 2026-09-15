@@ -39,7 +39,9 @@ def test_sample_limit_five_selects_exactly_five_objects(tmp_path):
     assert baseline.count_source() == 5
 
 
-def test_prediction_cache_uses_loaded_image_without_reopening_source(tmp_path, monkeypatch):
+def test_prediction_cache_uses_loaded_image_without_reopening_source(
+    tmp_path, monkeypatch
+):
     cache = PredictionCache(tmp_path)
     image = np.full((4, 4, 3), 7, dtype=np.uint8)
     mask = np.full((4, 4), 255, dtype=np.uint8)
@@ -64,12 +66,8 @@ def test_prediction_cache_parameters_invalidate_predictions(tmp_path):
     cache.put_array(image, "Algo", first, {"threshold": 0.5})
     cache.put_array(image, "Algo", second, {"threshold": 0.7})
 
-    assert np.array_equal(
-        cache.get_array(image, "Algo", {"threshold": 0.5}), first
-    )
-    assert np.array_equal(
-        cache.get_array(image, "Algo", {"threshold": 0.7}), second
-    )
+    assert np.array_equal(cache.get_array(image, "Algo", {"threshold": 0.5}), first)
+    assert np.array_equal(cache.get_array(image, "Algo", {"threshold": 0.7}), second)
 
 
 def test_telemetry_writes_summary_and_percentiles(tmp_path):
@@ -111,10 +109,7 @@ def test_baseline_uses_sample_limit_and_shared_scheduler(tmp_path):
     assert result["image_count"]["source"] == 2
     assert result["image_count"]["cropped"] == 0
     assert result["algorithms"]
-    assert all(
-        entry["source"]["num_samples"] == 2
-        for entry in result["algorithms"]
-    )
+    assert all(entry["source"]["num_samples"] == 2 for entry in result["algorithms"])
 
 
 def test_batch_loader_respects_memory_budget(tmp_path):

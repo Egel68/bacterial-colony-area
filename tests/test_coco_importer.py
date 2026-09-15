@@ -4,7 +4,6 @@ import json
 
 import cv2
 import numpy as np
-import pytest
 
 from train.dataset_adapters import CocoBboxImporter, load_manifest
 
@@ -38,9 +37,30 @@ def _make_source(root):
             {"file_name": "sp03_imgnone.jpg", "width": 120, "height": 100, "id": 3},
         ],
         "annotations": [
-            {"id": 1, "image_id": 1, "bbox": [10, 10, 20, 30], "category_id": 1, "area": 600, "iscrowd": False},
-            {"id": 2, "image_id": 1, "bbox": [60, 50, 25, 25], "category_id": 1, "area": 625, "iscrowd": False},
-            {"id": 3, "image_id": 2, "bbox": [30, 40, 20, 20], "category_id": 1, "area": 400, "iscrowd": False},
+            {
+                "id": 1,
+                "image_id": 1,
+                "bbox": [10, 10, 20, 30],
+                "category_id": 1,
+                "area": 600,
+                "iscrowd": False,
+            },
+            {
+                "id": 2,
+                "image_id": 1,
+                "bbox": [60, 50, 25, 25],
+                "category_id": 1,
+                "area": 625,
+                "iscrowd": False,
+            },
+            {
+                "id": 3,
+                "image_id": 2,
+                "bbox": [30, 40, 20, 20],
+                "category_id": 1,
+                "area": 400,
+                "iscrowd": False,
+            },
         ],
     }
     (root / "annot_COCO.json").write_text(json.dumps(coco), encoding="utf-8")
@@ -97,4 +117,6 @@ def test_importer_cropped_variant(tmp_path):
     # наличие cropped-записей только если dish найден; гарантированно должны быть source
     kinds = {s.id: s.kind for s in manifest.samples}
     assert any(kind == "source" for kind in kinds.values())
-    assert all(s.kind != "cropped" or (out / s.mask).is_file() for s in manifest.samples)
+    assert all(
+        s.kind != "cropped" or (out / s.mask).is_file() for s in manifest.samples
+    )

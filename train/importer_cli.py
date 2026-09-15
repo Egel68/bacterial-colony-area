@@ -19,7 +19,6 @@ def _verify_counts(source_root, output_manifest):
     При расхождении числа аннотаций для изображения между форматами больше порога
     выдаётся предупреждение. При отсутствии ZIP/YAML-дублей проверка пропускается.
     """
-    import io
     import json
     import zipfile
 
@@ -43,7 +42,9 @@ def _verify_counts(source_root, output_manifest):
         """Число боксов = число строк в `{stem}.txt` (YOLO нормализованный)."""
         with zipfile.ZipFile(zip_path) as zf:
             return {
-                Path(name).stem: len(zf.read(name).decode("utf-8", "ignore").strip().splitlines())
+                Path(name).stem: len(
+                    zf.read(name).decode("utf-8", "ignore").strip().splitlines()
+                )
                 for name in zf.namelist()
                 if name.lower().endswith(".txt")
             }
@@ -73,7 +74,9 @@ def _verify_counts(source_root, output_manifest):
         ref_cnt = ref_counts.get(stem) if ref_counts else None
         if ref_cnt is not None and abs(coco_cnt - ref_cnt) > 5:
             mismatches += 1
-            log.warning("Расхождение аннотаций %s: COCO=%d, дубль=%d", fname, coco_cnt, ref_cnt)
+            log.warning(
+                "Расхождение аннотаций %s: COCO=%d, дубль=%d", fname, coco_cnt, ref_cnt
+            )
     log.info(
         "Верификация завершена: %d расхождений > порога из %d изображений",
         mismatches,
@@ -83,11 +86,23 @@ def _verify_counts(source_root, output_manifest):
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    parser = argparse.ArgumentParser(description="Import 22022540 dataset into project contract")
-    parser.add_argument("--data-root", required=True, help="Path to the 22022540 source dir")
-    parser.add_argument("--output", default=None, help="Output dataset dir (defaults to <root>_imported)")
-    parser.add_argument("--crop", action="store_true", help="Also produce cropped-to-dish pairs")
-    parser.add_argument("--verify", action="store_true", help="Cross-check COCO vs YOLO/VOC counts")
+    parser = argparse.ArgumentParser(
+        description="Import 22022540 dataset into project contract"
+    )
+    parser.add_argument(
+        "--data-root", required=True, help="Path to the 22022540 source dir"
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Output dataset dir (defaults to <root>_imported)",
+    )
+    parser.add_argument(
+        "--crop", action="store_true", help="Also produce cropped-to-dish pairs"
+    )
+    parser.add_argument(
+        "--verify", action="store_true", help="Cross-check COCO vs YOLO/VOC counts"
+    )
     args = parser.parse_args()
 
     manifest = CocoBboxImporter().build(

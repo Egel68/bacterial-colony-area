@@ -87,9 +87,7 @@ def _subsets_from_manifest(
     if fixed_train or fixed_val:
         if not fixed_train and not fixed_val:
             raise ValueError("Manifest has only test subset, no train/val")
-        remaining = [
-            s for s in manifest.samples if s.subset not in ("train", "val")
-        ]
+        remaining = [s for s in manifest.samples if s.subset not in ("train", "val")]
         if remaining:
             full = list(range(len(remaining)))
             rng = np.random.default_rng(seed)

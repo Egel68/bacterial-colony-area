@@ -6,7 +6,7 @@ import numpy as np
 from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
 from .metrics import compute_segmentation_metrics
-from .registry import list_algorithms, get_algorithm, get_algorithm_descriptions
+from .registry import list_algorithms, get_algorithm_descriptions
 from .scheduler import execute_pipeline
 from .telemetry import TelemetryCollector
 from .statistics import (
@@ -220,7 +220,9 @@ def compute_wilcoxon_table(all_results: AllResults) -> Dict:
                     p = result["p_value"]
                     table[metric][pair_key] = {
                         "p_value": round(p, 6),
-                        "interpretation": "significant" if p < 0.05 else "not_significant",
+                        "interpretation": "significant"
+                        if p < 0.05
+                        else "not_significant",
                     }
     return table
 
