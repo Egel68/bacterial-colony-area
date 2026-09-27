@@ -124,6 +124,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: uv run python -m pytest tests/ -v --tb=short -m "not slow and not gui"
 
+      - name: Run GUI worker tests (Windows, offscreen)
+        if: matrix.os == 'windows-latest'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run python -m pytest tests/test_testing_window.py -v --tb=short -m gui
+
       - name: Create clean runtime environment for build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |

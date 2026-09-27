@@ -7,7 +7,8 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterable
 
 import cv2
@@ -37,6 +38,38 @@ class LoadedSample:
     ref: SampleRef
     image: np.ndarray
     mask: np.ndarray
+
+
+@dataclass
+class PipelineDiagnostics:
+    """Ошибки и счётчики прогона, доступные независимо от telemetry."""
+
+    detail_limit: int = 3
+    loaded_pairs: int = 0
+    completed_tasks: int = 0
+    load_failure_count: int = 0
+    algorithm_failure_count: int = 0
+    load_failure_details: list[str] = field(default_factory=list)
+    algorithm_failure_details: list[str] = field(default_factory=list)
+
+    def record_load_failure(self, error: Exception) -> None:
+        self.load_failure_count += 1
+        if len(self.load_failure_details) < self.detail_limit:
+            self.load_failure_details.append(str(error))
+
+    def record_algorithm_failure(
+        self,
+        name: str,
+        sample_name: str,
+        variant: str,
+        image_path: str,
+        error: Exception,
+    ) -> None:
+        self.algorithm_failure_count += 1
+        if len(self.algorithm_failure_details) < self.detail_limit:
+            self.algorithm_failure_details.append(
+                f"{name}/{sample_name}/{variant} ({image_path}): {error}"
+            )
 
 
 def _sample_refs(dataset: Any, *, use_cropped: bool = True) -> list[SampleRef]:
@@ -88,14 +121,37 @@ def _load_ref(ref: SampleRef) -> LoadedSample:
     image = ref.image
     mask = ref.mask
     if image is None:
-        image = cv2.imread(ref.image_path)
-    if image is None:
-        raise RuntimeError(f"Failed to read image: {ref.image_path}")
+        image = _decode_file(ref.image_path, cv2.IMREAD_COLOR, "изображение")
     if mask is None:
-        mask = cv2.imread(ref.mask_path, cv2.IMREAD_GRAYSCALE)
-    if mask is None:
-        raise RuntimeError(f"Failed to read mask: {ref.mask_path}")
+        mask = _decode_file(ref.mask_path, cv2.IMREAD_GRAYSCALE, "эталонную маску")
     return LoadedSample(ref, image, mask)
+
+
+def _decode_file(path: str, flags: int, description: str) -> np.ndarray:
+    """Декодирует файл через байты, чтобы поддерживать Unicode-пути на Windows."""
+    file_path = Path(path)
+    try:
+        encoded = file_path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Не удалось прочитать {description} «{file_path}»: {exc}"
+        ) from exc
+
+    if not encoded:
+        raise RuntimeError(f"Файл {description} пуст: «{file_path}»")
+
+    try:
+        decoded = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), flags)
+    except cv2.error as exc:
+        raise RuntimeError(
+            f"Не удалось декодировать {description} «{file_path}»: {exc}"
+        ) from exc
+    if decoded is None:
+        raise RuntimeError(
+            f"Не удалось декодировать {description} «{file_path}»: "
+            "формат не поддерживается или файл повреждён"
+        )
+    return decoded
 
 
 def iter_batches(
@@ -105,6 +161,7 @@ def iter_batches(
     memory_budget: int | None = None,
     telemetry: TelemetryCollector | None = None,
     use_cropped: bool = True,
+    diagnostics: PipelineDiagnostics | None = None,
 ) -> Iterable[list[LoadedSample]]:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
@@ -115,6 +172,8 @@ def iter_batches(
         try:
             loaded = _load_ref(ref)
         except Exception as exc:
+            if diagnostics:
+                diagnostics.record_load_failure(exc)
             if telemetry:
                 telemetry.record_error(str(exc))
                 telemetry.record_task(failed=1)
@@ -225,6 +284,7 @@ def execute_pipeline(
     use_cache: bool = False,
     telemetry: TelemetryCollector | None = None,
     use_cropped: bool = True,
+    diagnostics: PipelineDiagnostics | None = None,
 ) -> dict[str, dict[str, dict[str, dict[str, float]]]]:
     names = list_algorithms() if algorithm_names is None else list(algorithm_names)
     results: dict[str, dict[str, dict[str, dict[str, float]]]] = {
@@ -247,9 +307,12 @@ def execute_pipeline(
             memory_budget=memory_budget,
             telemetry=telemetry,
             use_cropped=use_cropped,
+            diagnostics=diagnostics,
         ),
         start=1,
     ):
+        if diagnostics:
+            diagnostics.loaded_pairs += len(batch)
         task_count = len(batch) * len(names)
         batch_object_names = {item.ref.name for item in batch}
         telemetry.record_work(
@@ -289,10 +352,15 @@ def execute_pipeline(
                         submitted_at,
                         cache_params[name],
                     )
-                    future_map[future] = (name, item.ref.name, item.ref.variant)
+                    future_map[future] = (
+                        name,
+                        item.ref.name,
+                        item.ref.variant,
+                        item.ref.image_path,
+                    )
                     telemetry.record_task(submitted=1, active=len(future_map))
             for future in as_completed(future_map):
-                name, sample_name, variant = future_map[future]
+                name, sample_name, variant, image_path = future_map[future]
                 try:
                     metrics = future.result()
                 except Exception as exc:
@@ -301,9 +369,15 @@ def execute_pipeline(
                     )
                     telemetry.record_task(failed=1)
                     telemetry.record_error(f"{name}/{sample_name}/{variant}: {exc}")
+                    if diagnostics:
+                        diagnostics.record_algorithm_failure(
+                            name, sample_name, variant, image_path, exc
+                        )
                     continue
                 results[name].setdefault(sample_name, {})[variant] = metrics
                 telemetry.record_task(completed=1)
+                if diagnostics:
+                    diagnostics.completed_tasks += 1
                 batch_completed += 1
                 telemetry.record_task(
                     active=max(0, len(future_map) - batch_completed),

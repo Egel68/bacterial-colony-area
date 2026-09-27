@@ -7,7 +7,7 @@ from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
 from .metrics import compute_segmentation_metrics
 from .registry import list_algorithms, get_algorithm_descriptions
-from .scheduler import execute_pipeline
+from .scheduler import PipelineDiagnostics, execute_pipeline
 from .telemetry import TelemetryCollector
 from .statistics import (
     compute_descriptive,
@@ -108,6 +108,7 @@ def run_all(
     batch_size: int = 8,
     memory_budget: int | None = None,
     telemetry: TelemetryCollector | None = None,
+    diagnostics: PipelineDiagnostics | None = None,
 ) -> AllResults:
     """Прогоняет выбранные алгоритмы по bounded in-memory batch-ам."""
     if algorithms is None:
@@ -130,6 +131,7 @@ def run_all(
         memory_budget=memory_budget,
         use_cache=use_cache,
         telemetry=telemetry,
+        diagnostics=diagnostics,
     )
 
 

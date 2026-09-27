@@ -38,6 +38,7 @@ from testing.registry import (
     register_algorithm_instance,
 )
 from testing.runner import run_all, compare_algorithms
+from testing.scheduler import PipelineDiagnostics
 from testing.telemetry import TelemetryCollector
 from .responsive import install_application_responsive_sizing
 
@@ -138,23 +139,37 @@ class _RunWorker(QObject):
                 enabled=self.telemetry_enabled,
                 output_path=performance_output,
             )
+            diagnostics = PipelineDiagnostics()
             all_results = run_all(
                 dataset,
                 algorithms=self.algorithm_names,
                 workers=self.workers,
                 batch_size=self.batch_size,
                 telemetry=telemetry,
+                diagnostics=diagnostics,
             )
             if not any(
                 sample_results
                 for algorithm_results in all_results.values()
                 for sample_results in algorithm_results.values()
             ):
-                self.failed.emit(
-                    "Прогон не получил результатов: пары могли не прочитаться "
-                    "или все задачи алгоритмов завершились с ошибкой. "
-                    "Проверьте файлы датасета и выбранные алгоритмы."
-                )
+                if diagnostics.loaded_pairs == 0:
+                    details = "\n".join(diagnostics.load_failure_details)
+                    suffix = f"\nПримеры проблем:\n{details}" if details else ""
+                    self.failed.emit(
+                        "Не удалось прочитать ни одной пары изображения и маски. "
+                        f"Неуспешных пар: {diagnostics.load_failure_count}. "
+                        f"Проверьте файлы и пути датасета.{suffix}"
+                    )
+                else:
+                    details = "\n".join(diagnostics.algorithm_failure_details)
+                    suffix = f"\nПримеры ошибок:\n{details}" if details else ""
+                    self.failed.emit(
+                        "Все запуски выбранных алгоритмов завершились с ошибкой "
+                        f"для {diagnostics.loaded_pairs} прочитанных пар. "
+                        f"Неуспешных задач: {diagnostics.algorithm_failure_count}. "
+                        f"Проверьте модели и параметры алгоритмов.{suffix}"
+                    )
                 return
 
             comparison = None

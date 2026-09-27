@@ -18,3 +18,10 @@
 - [x] 4.1 Add `docs/datasets.md` with all supplied AGAR, Petri plates, 22022540, MDPI, Nature, and NIST links; distinguish dataset records from articles/software and include versioned identifiers, citations, access/licensing facts only where confirmed, and a verification date; verify each entry against its primary source or DOI metadata.
 - [x] 4.2 Record the observed local directory mappings and their limits, including the unverified `Petri_plates` correspondence; verify local paths/counts and ensure the documentation does not assert checksum-level identity.
 - [x] 4.3 Link the catalog from README, user/testing guides, and the 22022540 pipeline guide, and allowlist the new docs file in `.gitignore`; verify every relative link resolves and the new file is visible to Git.
+
+## 5. Fix Windows manifest runs with Unicode paths and expose useful failures
+
+- [ ] 5.1 Reproduce the reported manifest-run failure on Windows with the dataset rooted under a non-ASCII path such as `C:/Users/Егор/...`; record whether image or mask decoding fails and verify the failure is not caused by manifest resolution or algorithm execution.
+- [x] 5.2 Make the shared scheduler decode supported image and grayscale-mask files from Unicode-containing filesystem paths without changing formats or dataset files; verify with a focused path-decoding regression test.
+- [x] 5.3 Track data-pair read/decode failures separately from algorithm task failures and expose actionable GUI messages with representative pair paths/reasons; verify all-unreadable and all-algorithms-fail cases produce distinct diagnostics.
+- [ ] 5.4 Add/adjust end-to-end manifest GUI tests for a Unicode-containing path, unreadable pairs, and algorithm failures; run the focused suites and Windows CI checks and verify valid pairs produce results on Windows.

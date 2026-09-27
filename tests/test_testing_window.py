@@ -166,11 +166,13 @@ def _write_manifest_dataset(root, stems=("sample-a", "sample-b"), include_croppe
         source_image = root / "source" / f"{stem}.jpg"
         source_mask = root / "source" / f"{stem}_mask.png"
         source_image.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(
-            str(source_image),
-            np.full((16, 16, 3), 60 + index, dtype=np.uint8),
-        )
-        cv2.imwrite(str(source_mask), np.zeros((16, 16), dtype=np.uint8))
+        for path, image, extension in (
+            (source_image, np.full((16, 16, 3), 60 + index, dtype=np.uint8), ".jpg"),
+            (source_mask, np.zeros((16, 16), dtype=np.uint8), ".png"),
+        ):
+            ok, encoded = cv2.imencode(extension, image)
+            assert ok
+            path.write_bytes(encoded.tobytes())
         samples.append(
             {
                 "id": stem,
@@ -184,11 +186,17 @@ def _write_manifest_dataset(root, stems=("sample-a", "sample-b"), include_croppe
             cropped_image = root / "cropped" / f"{stem}_cropped.jpg"
             cropped_mask = root / "cropped" / f"{stem}_cropped_mask.png"
             cropped_image.parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(
-                str(cropped_image),
-                np.full((12, 12, 3), 100 + index, dtype=np.uint8),
-            )
-            cv2.imwrite(str(cropped_mask), np.zeros((12, 12), dtype=np.uint8))
+            for path, image, extension in (
+                (
+                    cropped_image,
+                    np.full((12, 12, 3), 100 + index, dtype=np.uint8),
+                    ".jpg",
+                ),
+                (cropped_mask, np.zeros((12, 12), dtype=np.uint8), ".png"),
+            ):
+                ok, encoded = cv2.imencode(extension, image)
+                assert ok
+                path.write_bytes(encoded.tobytes())
             samples.append(
                 {
                     "id": f"{stem}_cropped",
@@ -451,8 +459,134 @@ def test_worker_manifest_run_fails_if_every_pair_cannot_be_decoded(qtbot, tmp_pa
 
     assert not finished
     assert failed
-    assert "не получил результатов" in failed[0]
+    assert "Не удалось прочитать ни одной пары" in failed[0]
+    assert "broken.jpg" in failed[0]
+    assert "Все запуски выбранных алгоритмов" not in failed[0]
     assert (tmp_path / "performance.json").is_file()
+
+
+def test_worker_reports_unreadable_pair_but_keeps_valid_results(qtbot, tmp_path):
+    import json
+
+    import cv2
+    import numpy as np
+
+    from testing.registry import _INSTANCES
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    assert cv2.imwrite(
+        str(source_dir / "good.jpg"), np.full((16, 16, 3), 60, dtype=np.uint8)
+    )
+    assert cv2.imwrite(
+        str(source_dir / "good_mask.png"), np.zeros((16, 16), dtype=np.uint8)
+    )
+    (source_dir / "broken.jpg").write_bytes(b"not an image")
+    (source_dir / "broken_mask.png").write_bytes(b"not a mask")
+    (tmp_path / "dataset.json").write_text(
+        json.dumps(
+            {
+                "samples": [
+                    {
+                        "id": "good",
+                        "kind": "source",
+                        "image": "source/good.jpg",
+                        "mask": "source/good_mask.png",
+                    },
+                    {
+                        "id": "broken",
+                        "kind": "source",
+                        "image": "source/broken.jpg",
+                        "mask": "source/broken_mask.png",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen = []
+    _register_mask_algorithm("PartialReadAlgorithm", seen)
+    try:
+        worker = _RunWorker(
+            str(tmp_path), ["PartialReadAlgorithm"], workers=1, batch_size=1
+        )
+        finished = []
+        failed = []
+        worker.finished.connect(lambda results, extra: finished.append(results))
+        worker.failed.connect(lambda message: failed.append(message))
+        worker.run()
+    finally:
+        _INSTANCES.pop("PartialReadAlgorithm", None)
+
+    assert not failed
+    assert len(finished) == 1
+    assert set(finished[0]["PartialReadAlgorithm"]) == {"good"}
+    assert seen == [((16, 16), False)]
+
+
+def test_worker_manifest_run_reports_algorithm_failures_separately(qtbot, tmp_path):
+    from testing.interface import BaseDetectionAlgorithm
+    from testing.registry import _INSTANCES, register_algorithm_instance
+
+    _write_manifest_dataset(tmp_path, stems=("valid",), include_cropped=False)
+
+    class AlwaysFailAlgorithm(BaseDetectionAlgorithm):
+        @property
+        def name(self):
+            return "AlwaysFailAlgorithm"
+
+        @property
+        def description(self):
+            return "test algorithm which always fails"
+
+        def detect(self, image, is_cropped=False):
+            raise RuntimeError("synthetic algorithm failure")
+
+    register_algorithm_instance("AlwaysFailAlgorithm", AlwaysFailAlgorithm())
+    try:
+        worker = _RunWorker(str(tmp_path), ["AlwaysFailAlgorithm"], workers=1)
+        finished = []
+        failed = []
+        worker.finished.connect(lambda results, extra: finished.append(results))
+        worker.failed.connect(lambda message: failed.append(message))
+        worker.run()
+    finally:
+        _INSTANCES.pop("AlwaysFailAlgorithm", None)
+
+    assert not finished
+    assert failed
+    assert "Все запуски выбранных алгоритмов завершились с ошибкой" in failed[0]
+    assert "valid/source" in failed[0]
+    assert str(tmp_path / "source" / "valid.jpg") in failed[0]
+    assert "synthetic algorithm failure" in failed[0]
+    assert "Не удалось прочитать ни одной пары" not in failed[0]
+
+
+def test_worker_runs_manifest_under_unicode_windows_path(qtbot, tmp_path):
+    from testing.registry import _INSTANCES
+
+    root = tmp_path / "Егор" / "22022540_imported"
+    _write_manifest_dataset(root, stems=("unicode",), include_cropped=True)
+    seen = []
+    _register_mask_algorithm("UnicodePathManifest", seen)
+    try:
+        worker = _RunWorker(str(root), ["UnicodePathManifest"], batch_size=1, workers=1)
+        finished = []
+        failed = []
+        worker.finished.connect(
+            lambda results, extra: finished.append((results, extra))
+        )
+        worker.failed.connect(lambda message: failed.append(message))
+        worker.run()
+    finally:
+        _INSTANCES.pop("UnicodePathManifest", None)
+
+    assert not failed
+    assert len(finished) == 1
+    samples = finished[0][0]["UnicodePathManifest"]
+    assert set(samples) == {"unicode", "unicode_cropped"}
+    assert ((16, 16), False) in seen
+    assert ((12, 12), True) in seen
 
 
 def test_worker_malformed_manifest_fails_with_clear_message(qtbot, tmp_path):
