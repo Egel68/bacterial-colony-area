@@ -6,8 +6,9 @@
 
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -22,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -37,6 +39,7 @@ from testing.registry import (
 )
 from testing.runner import run_all, compare_algorithms
 from testing.telemetry import TelemetryCollector
+from .responsive import install_application_responsive_sizing
 
 
 class _RunWorker(QObject):
@@ -141,12 +144,16 @@ class TestingWindow(QMainWindow):
         self._thread = None
 
         self._init_ui()
+        self._responsive_sizer = install_application_responsive_sizing(
+            self, minimum_scale=0.75
+        )
         self._refresh_algorithms()
 
     def _init_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        root_layout = QVBoxLayout(central)
+        self.content_widget = QWidget()
+        content = self.content_widget
+        content.setMinimumWidth(0)
+        root_layout = QVBoxLayout(content)
         root_layout.setSpacing(12)
 
         # --- Датасет ---
@@ -155,9 +162,9 @@ class TestingWindow(QMainWindow):
         ds_row = QHBoxLayout()
         self.dataset_input = QLineEdit(self.data_root)
         ds_row.addWidget(self.dataset_input, 1)
-        btn_browse = QPushButton("📂 Выбрать папку…")
-        btn_browse.clicked.connect(self._choose_dataset)
-        ds_row.addWidget(btn_browse)
+        self.btn_browse_dataset = QPushButton("📂 Выбрать папку…")
+        self.btn_browse_dataset.clicked.connect(self._choose_dataset)
+        ds_row.addWidget(self.btn_browse_dataset)
         ds_form.addRow(ds_row)
 
         hint = QLabel(
@@ -177,14 +184,15 @@ class TestingWindow(QMainWindow):
         alg_group = QGroupBox("🧠 Алгоритмы")
         alg_layout = QVBoxLayout(alg_group)
         self.alg_widget = QWidget()
+        self.alg_widget.setMinimumWidth(0)
         self.alg_list_layout = QVBoxLayout(self.alg_widget)
         self.alg_list_layout.setContentsMargins(0, 0, 0, 0)
         self.alg_list_layout.addStretch()
         alg_layout.addWidget(self.alg_widget)
 
-        btn_load_model = QPushButton("⬇️ Загрузить модель (.onnx)…")
-        btn_load_model.clicked.connect(self._load_external_model)
-        alg_layout.addWidget(btn_load_model)
+        self.btn_load_model = QPushButton("⬇️ Загрузить модель (.onnx)…")
+        self.btn_load_model.clicked.connect(self._load_external_model)
+        alg_layout.addWidget(self.btn_load_model)
         root_layout.addWidget(alg_group)
 
         # --- Параметры ---
@@ -194,7 +202,8 @@ class TestingWindow(QMainWindow):
         self.chk_per_snapshot.setChecked(True)
         params_layout.addWidget(self.chk_per_snapshot)
 
-        tuning_row = QHBoxLayout()
+        tuning_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.tuning_row = tuning_row
         tuning_row.addWidget(QLabel("Batch:"))
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(1, 512)
@@ -210,7 +219,8 @@ class TestingWindow(QMainWindow):
         tuning_row.addStretch()
         params_layout.addLayout(tuning_row)
 
-        compare_row = QHBoxLayout()
+        compare_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.compare_row = compare_row
         compare_row.addWidget(QLabel("Парное сравнение:"))
         self.cbx_compare_a = QComboBox()
         self.cbx_compare_b = QComboBox()
@@ -223,7 +233,8 @@ class TestingWindow(QMainWindow):
         # --- Запуск / прогресс ---
         run_group = QGroupBox("🚀 Запуск")
         run_layout = QVBoxLayout(run_group)
-        run_row = QHBoxLayout()
+        run_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.run_row = run_row
         self.btn_run = QPushButton("▶️ Запустить тест")
         self.btn_run.clicked.connect(self._start_run)
         run_row.addWidget(self.btn_run)
@@ -243,6 +254,7 @@ class TestingWindow(QMainWindow):
         results_group = QGroupBox("📊 Результаты")
         results_layout = QVBoxLayout(results_group)
         self.table = QTableWidget(0, 6)
+        self.table.setMinimumSize(0, 0)
         self.table.setHorizontalHeaderLabels(
             ["Алгоритм", "IoU", "Dice", "F1", "Precision", "Recall"]
         )
@@ -252,6 +264,7 @@ class TestingWindow(QMainWindow):
         )
         results_layout.addWidget(self.table)
         self.comparison_table = QTableWidget(0, 3)
+        self.comparison_table.setMinimumSize(0, 0)
         self.comparison_table.setHorizontalHeaderLabels(
             ["Снимок", "Variant", "Победитель"]
         )
@@ -261,6 +274,28 @@ class TestingWindow(QMainWindow):
         self.comparison_table.setVisible(False)
         results_layout.addWidget(self.comparison_table)
         root_layout.addWidget(results_group, stretch=1)
+
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setObjectName("testingContentScroll")
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setMinimumSize(0, 0)
+        self.content_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.content_scroll.setWidget(content)
+        self.setCentralWidget(self.content_scroll)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = self.contentsRect().width() < 760
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if compact
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self.tuning_row.setDirection(direction)
+        self.compare_row.setDirection(direction)
+        self.run_row.setDirection(direction)
 
     def _refresh_algorithms(self):
         """Обновляет чекбоксы алгоритмов и выпадающие списки парного сравнения."""

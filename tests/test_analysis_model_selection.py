@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import pytest
 from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QSize
 
 from analysis.geometry import PetriInfo
 from testing.interface import BaseDetectionAlgorithm
@@ -60,6 +61,9 @@ def test_analysis_runs_selected_model_asynchronously_with_tile_progress(
     window = AnalysisWindow(str(image_path))
     qtbot.addWidget(window)
     window.show()
+    qtbot.waitExposed(window)
+    window.resize(800, 600)
+    qtbot.waitUntil(lambda: window.size() == QSize(800, 600), timeout=3000)
     index = window.algorithm_combo.findData(algorithm.name)
     assert index >= 0
     window.algorithm_combo.setCurrentIndex(index)
@@ -70,6 +74,14 @@ def test_analysis_runs_selected_model_asynchronously_with_tile_progress(
     timer = QTimer(window)
     timer.timeout.connect(lambda: ticks.append(time.monotonic()))
     timer.start(10)
+    resize_events = []
+
+    def resize_during_analysis(width, height):
+        window.resize(width, height)
+        resize_events.append((width, height))
+
+    QTimer.singleShot(10, lambda: resize_during_analysis(640, 480))
+    QTimer.singleShot(35, lambda: resize_during_analysis(1280, 800))
     gui_thread_id = threading.get_ident()
 
     window._run_colony_analysis_only()
@@ -77,6 +89,8 @@ def test_analysis_runs_selected_model_asynchronously_with_tile_progress(
     timer.stop()
 
     assert ticks
+    assert resize_events == [(640, 480), (1280, 800)]
+    assert window.size() == QSize(1280, 800)
     assert algorithm.thread_ids and algorithm.thread_ids[0] != gui_thread_id
     assert window.controller.colony_mask is not None
     assert window.analysis_results.colony_count == 1

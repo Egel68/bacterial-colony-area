@@ -11,6 +11,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from analysis.params import AnalysisParams
 from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -35,6 +36,7 @@ from PyQt6.QtWidgets import (
 
 from analysis.geometry import PetriInfo
 from .controllers.analysis_controller import AnalysisController
+from .responsive import ResponsiveMetrics, install_application_responsive_sizing
 
 
 class _AlgorithmWorker(QObject):
@@ -70,7 +72,8 @@ class ImageLabel(QLabel):
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumSize(400, 400)
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._original_pixmap = None
 
     def set_image(self, pixmap: QPixmap):
@@ -109,9 +112,13 @@ class AnalysisWindow(QMainWindow):
         self._analysis_busy = False
 
         self._updating_ui = False
+        self.setMinimumSize(0, 0)
 
         self._load_image()
         self._init_ui()
+        self._responsive_sizer = install_application_responsive_sizing(
+            self, minimum_scale=0.75
+        )
         self._run_full_analysis()
 
     def _load_image(self):
@@ -125,17 +132,27 @@ class AnalysisWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_layout = QHBoxLayout(central_widget)
+        self.main_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, central_widget)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(8)
 
-        self._create_image_panel(main_layout)
-
-        scroll = QScrollArea()
+        self.controls_scroll_area = QScrollArea()
+        scroll = self.controls_scroll_area
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(450)
+        scroll.setMinimumSize(0, 0)
+        scroll.setMinimumWidth(260)
+        scroll.setMaximumWidth(450)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         scroll.setStyleSheet("QScrollArea {border: none; background-color: #1e1e2e;}")
-
-        controls_widget = QWidget()
-        self.controls_layout = QVBoxLayout(controls_widget)
+        self.controls_widget = QWidget()
+        self.controls_widget.setMinimumSize(0, 0)
+        self.controls_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        self.controls_layout = QVBoxLayout(self.controls_widget)
         self.controls_layout.setSpacing(15)
 
         self._create_view_controls(self.controls_layout)
@@ -143,11 +160,53 @@ class AnalysisWindow(QMainWindow):
         self._create_algorithm_controls(self.controls_layout)
         self._create_results_panel(self.controls_layout)
         self._create_action_buttons(self.controls_layout)
-
         self.controls_layout.addStretch()
+
+        controls_widget = self.controls_widget
         scroll.setWidget(controls_widget)
-        main_layout.addWidget(scroll)
+        scroll.setMinimumHeight(0)
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self._create_image_panel(self.main_layout)
+        self.main_layout.addWidget(scroll, stretch=1)
+        self._controls_reflowed = False
+        self._update_controls_width()
         self.statusBar().showMessage("Готов к работе")
+
+    def _update_controls_width(self):
+        if not hasattr(self, "controls_scroll_area"):
+            return
+        if getattr(self, "_controls_reflowed", False):
+            self.controls_scroll_area.setMaximumWidth(16_777_215)
+            return
+
+        sizer = getattr(self, "_responsive_sizer", None)
+        metrics = getattr(sizer, "metrics", None) or ResponsiveMetrics(1.0)
+        available_width = self.contentsRect().width() or self.width()
+        minimum_width = metrics.dimension(280, minimum=1)
+        maximum_width = metrics.dimension(450, minimum=minimum_width)
+        target_width = max(
+            minimum_width,
+            min(maximum_width, round(available_width * 0.34)),
+        )
+        self.controls_scroll_area.setMaximumWidth(target_width)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_controls_width()
+        compact = self.width() < 920 or self.height() < 680
+        if compact != self._controls_reflowed:
+            self._controls_reflowed = compact
+            self.main_layout.setDirection(
+                QBoxLayout.Direction.TopToBottom
+                if compact
+                else QBoxLayout.Direction.LeftToRight
+            )
+            sizer = getattr(self, "_responsive_sizer", None)
+            metrics = getattr(sizer, "metrics", None) or ResponsiveMetrics(1.0)
+            self.controls_scroll_area.setMaximumHeight(
+                metrics.dimension(350, minimum=1) if compact else 16_777_215
+            )
+            self._update_controls_width()
 
     def _create_image_panel(self, layout: QHBoxLayout):
         image_frame = QFrame()
@@ -164,7 +223,7 @@ class AnalysisWindow(QMainWindow):
         vl.addWidget(self.image_header)
 
         self.image_label = ImageLabel()
-        vl.addWidget(self.image_label)
+        vl.addWidget(self.image_label, stretch=1)
 
         self.status_label = QLabel("Готов к работе")
         self.status_label.setStyleSheet("color: #a6adc8;")
@@ -233,12 +292,10 @@ class AnalysisWindow(QMainWindow):
         self.spin_radius.valueChanged.connect(self._on_geometry_changed)
         vl.addRow("Радиус:", self.spin_radius)
 
-        btn_reset = QPushButton("Сбросить к авто-поиску")
-        btn_reset.setStyleSheet(
-            "background-color: #45475a; font-size: 11px; padding: 5px;"
-        )
-        btn_reset.clicked.connect(self._reset_geometry)
-        vl.addRow(btn_reset)
+        self.btn_reset_geometry = QPushButton("Сбросить к авто-поиску")
+        self.btn_reset_geometry.setStyleSheet("background-color: #45475a;")
+        self.btn_reset_geometry.clicked.connect(self._reset_geometry)
+        vl.addRow(self.btn_reset_geometry)
 
         layout.addWidget(group)
 
@@ -289,11 +346,8 @@ class AnalysisWindow(QMainWindow):
         vl.addWidget(self.spin_min_size)
 
         # --- Секция сплошных зон (НОВАЯ) ---
-        vl.addSpacing(10)
         fill_frame = QFrame()
-        fill_frame.setStyleSheet(
-            "background-color: #313244; border-radius: 6px; padding: 5px;"
-        )
+        fill_frame.setStyleSheet("background-color: #313244; border-radius: 6px;")
         fill_layout = QVBoxLayout(fill_frame)
 
         self.chk_solid_fill = QCheckBox("💧 Заполнять сплошные зоны")
@@ -331,19 +385,19 @@ class AnalysisWindow(QMainWindow):
         vl = QVBoxLayout(group)
         self.text_results = QTextEdit()
         self.text_results.setReadOnly(True)
-        self.text_results.setMaximumHeight(150)
+        self.text_results.setMinimumHeight(58)
         vl.addWidget(self.text_results)
         layout.addWidget(group)
 
     def _create_action_buttons(self, layout: QVBoxLayout):
         h = QHBoxLayout()
-        btn_save = QPushButton("💾 Сохранить")
-        btn_save.clicked.connect(self._save_result)
-        btn_close = QPushButton("Закрыть")
-        btn_close.setObjectName("secondary")
-        btn_close.clicked.connect(self.close)
-        h.addWidget(btn_save)
-        h.addWidget(btn_close)
+        self.btn_save = QPushButton("💾 Сохранить")
+        self.btn_save.clicked.connect(self._save_result)
+        self.btn_close = QPushButton("Закрыть")
+        self.btn_close.setObjectName("secondary")
+        self.btn_close.clicked.connect(self.close)
+        h.addWidget(self.btn_save)
+        h.addWidget(self.btn_close)
         layout.addLayout(h)
 
     # --- ЛОГИКА ---
