@@ -18,7 +18,67 @@ on:
   workflow_dispatch:
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_build: ${{ steps.filter.outputs.run_build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes outside OpenSpec
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run requested; running the full build matrix."
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$BASE_SHA" || -z "$AFTER_SHA" ]]; then
+              echo "Missing pull request base/merge SHA." >&2
+              exit 1
+            fi
+            # Для PR AFTER_SHA — synthetic merge commit, доступный и для fork PR.
+            diff_range=("$BASE_SHA" "$AFTER_SHA")
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
+              echo "New branch push; running the full build matrix."
+              echo "run_build=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            diff_range=("$BEFORE_SHA" "$AFTER_SHA")
+          else
+            echo "Unexpected workflow event: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          if git diff --no-renames --quiet "${diff_range[@]}" -- . ':(exclude)openspec/**'; then
+            echo "run_build=false" >> "$GITHUB_OUTPUT"
+            echo "Only OpenSpec files changed; skipping tests and packaging."
+          else
+            diff_status=$?
+            if [[ "$diff_status" -ne 1 ]]; then
+              echo "git diff failed with exit code $diff_status." >&2
+              exit "$diff_status"
+            fi
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "Changes outside OpenSpec detected; running tests and packaging."
+          fi
+
   build-executable:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_build == 'true'
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -126,3 +186,38 @@ jobs:
         with:
           name: BacteriaAnalyzer-Windows
           path: BacteriaAnalyzer.exe
+
+  required-ci:
+    name: required-ci
+    if: always()
+    needs:
+      - detect-changes
+      - build-executable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require change detection and, when needed, the build matrix
+        shell: bash
+        env:
+          DETECTION_RESULT: ${{ needs.detect-changes.result }}
+          RUN_BUILD: ${{ needs.detect-changes.outputs.run_build }}
+          BUILD_RESULT: ${{ needs.build-executable.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$DETECTION_RESULT" != "success" ]]; then
+            echo "Change detection did not succeed: $DETECTION_RESULT" >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_BUILD" == "true" && "$BUILD_RESULT" == "success" ]]; then
+            echo "Required Linux/Windows build matrix passed."
+            exit 0
+          fi
+
+          if [[ "$RUN_BUILD" == "false" && "$BUILD_RESULT" == "skipped" ]]; then
+            echo "Only OpenSpec files changed; build matrix was correctly skipped."
+            exit 0
+          fi
+
+          echo "Unexpected build decision/result: run_build=$RUN_BUILD, build=$BUILD_RESULT" >&2
+          exit 1

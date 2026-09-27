@@ -2,7 +2,7 @@
 
 ### Requirement: CI build matrix and quality gates
 
-Система SHALL запускать сборку Nuitka в CI на матрице `ubuntu-latest` и `windows-latest` при открытии или обновлении PR в `develop`, при каждом push в `main` или `master` (включая merge изменений из `develop`), а также по ручному `workflow_dispatch`. Push в `develop` или `feature/*` SHALL NOT самостоятельно запускать workflow: commits feature-ветки SHALL проверяться через события PR, включая новые commits (`synchronize`), чтобы один push в открытую PR-ветку не создавал дублирующую CI-матрицу. Перед сборкой SHALL выполняться проверка качества на зафиксированной версии `ruff` (не плавающий `latest`), и SHALL запускаться тесты с маркировкой `not slow and not gui`. Артефакты собранного бинарника SHALL загружаться для каждого runner-а. Шаги workflow SHALL использовать actions на рантайме `node24` (например, `actions/checkout@v7`, `actions/upload-artifact@v7`), Linux-runner SHALL включать `ccache` среди системных зависимостей, а перед checkout SHALL выполняться `git config --global init.defaultBranch main`, чтобы сборка SHALL завершаться без deprecation-warning Node.js 20, без `Nuitka-Scons: not using ccache` и без git-hint про `master`.
+Система SHALL запускать проверку изменений при открытии или обновлении PR в `develop` и при push в `main` или `master` (включая merge изменений из `develop`), а также по ручному `workflow_dispatch`. Полная Linux/Windows матрица тестов и сборки SHALL выполняться, если изменён хотя бы один файл за пределами `openspec/`; при изменениях только в `openspec/` build matrix SHALL NOT создаваться. Отдельная стабильная проверка `required-ci` SHALL запускаться всегда, завершаться успешно для OpenSpec-only изменений и требовать успешной матрицы для любых изменений вне `openspec/`; ошибка определения изменённых файлов SHALL блокировать merge. Ruleset ветки `develop` SHALL требовать check `required-ci` вместо отдельных checks matrix jobs. Ручной `workflow_dispatch` SHALL всегда запускать полную матрицу. Push в `develop` или `feature/*` SHALL NOT самостоятельно запускать workflow: commits feature-ветки SHALL проверяться через события PR, включая новые commits (`synchronize`), чтобы один push в открытую PR-ветку не создавал дублирующую CI-матрицу. Перед сборкой SHALL выполняться проверка качества на зафиксированной версии `ruff` (не плавающий `latest`), и SHALL запускаться тесты с маркировкой `not slow and not gui`. Артефакты собранного бинарника SHALL загружаться для каждого runner-а. Шаги workflow SHALL использовать actions на рантайме `node24` (например, `actions/checkout@v7`, `actions/upload-artifact@v7`), Linux-runner SHALL включать `ccache` среди системных зависимостей, а перед checkout SHALL выполняться `git config --global init.defaultBranch main`, чтобы сборка SHALL завершаться без deprecation-warning Node.js 20, без `Nuitka-Scons: not using ccache` и без git-hint про `master`.
 
 #### Scenario: Feature PR pushes trigger exactly one matrix
 - **WHEN** commit отправляется в `feature/*` с открытым PR в `develop`
@@ -15,6 +15,14 @@
 #### Scenario: Feature branch can be checked before opening a PR
 - **WHEN** пользователь вручную запускает workflow через `workflow_dispatch` для feature-ветки
 - **THEN** SHALL запускаться та же CI-матрица Linux/Windows
+
+#### Scenario: OpenSpec-only changes skip expensive matrix without blocking merge
+- **WHEN** все изменения PR или push находятся только в `openspec/`
+- **THEN** Linux/Windows matrix jobs SHALL NOT создаваться, а обязательная проверка `required-ci` SHALL завершиться успешно
+
+#### Scenario: Changes outside OpenSpec run the full matrix
+- **WHEN** PR или push включает изменение хотя бы одного файла вне `openspec/`
+- **THEN** SHALL выполняться полные lint, test, Linux/Windows packaging и packaged CPU smoke checks, и `required-ci` SHALL требовать успешное завершение всех matrix jobs
 
 #### Scenario: Verified by ruff and tests before build
 - **WHEN** выполняется шаг качества в `build.yaml`
