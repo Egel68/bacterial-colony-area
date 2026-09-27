@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSlider,
     QTableWidget,
     QVBoxLayout,
@@ -195,8 +194,9 @@ def _show_at_size(qtbot, window, size, restore=False):
         qtbot.wait(20)
     window.resize(*size)
     qtbot.waitUntil(
-        lambda: abs(window.width() - size[0]) <= 2
-        and abs(window.height() - size[1]) <= 2,
+        lambda: (
+            abs(window.width() - size[0]) <= 2 and abs(window.height() - size[1]) <= 2
+        ),
         timeout=3000,
     )
     # Qt устанавливает геометрию верхнего окна синхронно, но перестройка layout
@@ -642,9 +642,7 @@ def test_labeling_window_toolbar_and_image_fit_compact_sizes(
 
 @pytest.mark.gui
 @pytest.mark.parametrize("size", [(1280, 800), (640, 480), (400, 300)])
-def test_session_dialog_actions_remain_reachable_with_long_paths(
-    qtbot, tmp_path, size
-):
+def test_session_dialog_actions_remain_reachable_with_long_paths(qtbot, tmp_path, size):
     config_path = tmp_path / "config" / "settings.json"
     manager = SessionManager(config_path=config_path)
     long_root = tmp_path / ("long-storage-segment-" * 4) / "sessions"

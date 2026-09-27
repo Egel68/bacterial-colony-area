@@ -145,9 +145,7 @@ class AnalysisWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustIgnored)
-        scroll.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
-        )
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         scroll.setStyleSheet("QScrollArea {border: none; background-color: #1e1e2e;}")
         self.controls_widget = QWidget()
         self.controls_widget.setMinimumSize(0, 0)
@@ -167,9 +165,7 @@ class AnalysisWindow(QMainWindow):
         controls_widget = self.controls_widget
         scroll.setWidget(controls_widget)
         scroll.setMinimumHeight(0)
-        scroll.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
-        )
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._create_image_panel(self.main_layout)
         self.main_layout.addWidget(scroll, stretch=1)
         self._controls_reflowed = False

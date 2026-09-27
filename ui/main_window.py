@@ -205,7 +205,9 @@ class MainWindow(QMainWindow):
         if self.main_layout is None:
             return
 
-        compact = self.contentsRect().width() < 960 or self.contentsRect().height() < 650
+        compact = (
+            self.contentsRect().width() < 960 or self.contentsRect().height() < 650
+        )
         direction = (
             QBoxLayout.Direction.TopToBottom
             if compact

@@ -118,9 +118,7 @@ class ResponsiveSizer(QObject):
         for widget in widgets:
             minimum = widget.minimumSize()
             maximum = widget.maximumSize()
-            constrained_width = (
-                minimum.width() > 0 or maximum.width() < WIDGET_SIZE_MAX
-            )
+            constrained_width = minimum.width() > 0 or maximum.width() < WIDGET_SIZE_MAX
             constrained_height = (
                 minimum.height() > 0 or maximum.height() < WIDGET_SIZE_MAX
             )
@@ -174,9 +172,12 @@ class ResponsiveSizer(QObject):
                     scale_dimension(spacing, new_metrics.scale, 1 if spacing > 0 else 0)
                 )
 
-        for widget, (minimum, maximum, constrained_width, constrained_height) in (
-            self._base_widget_constraints.items()
-        ):
+        for widget, (
+            minimum,
+            maximum,
+            constrained_width,
+            constrained_height,
+        ) in self._base_widget_constraints.items():
             if widget is self.window:
                 continue
             if constrained_width:
