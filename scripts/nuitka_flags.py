@@ -55,15 +55,15 @@ def build_flags(root: Path) -> list[str]:
         for path in site_packages
         if (path / "onnxruntime" / "capi").is_dir()
     ]
+    # Nuitka's onnxruntime package config collects the Python extensions and
+    # Windows DLLs. Include only POSIX runtime libraries explicitly: adding the
+    # Windows onnxruntime.dll again as a data file conflicts with Nuitka's DLL
+    # collector at the same distribution destination.
     for ort_capi in ort_capi_dirs:
-        # Nuitka's onnxruntime package config collects the python extensions and
-        # provider helpers. Explicitly include only the dynamically loaded ORT
-        # runtime library to avoid duplicate destinations for provider libraries.
         for pattern in (
             "libonnxruntime.so",
             "libonnxruntime.so.*",
             "libonnxruntime.dylib",
-            "onnxruntime.dll",
         ):
             for library in sorted(ort_capi.glob(pattern)):
                 flags.append(

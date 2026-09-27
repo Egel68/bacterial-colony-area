@@ -80,7 +80,7 @@ def test_nuitka_build_includes_cpu_onnxruntime_and_models(tmp_path):
     )
 
 
-def test_nuitka_build_collects_ort_dlls_from_windows_environment(tmp_path):
+def test_nuitka_leaves_windows_ort_dlls_to_package_config(tmp_path):
     ort_capi = tmp_path / ".venv-build/Lib/site-packages/onnxruntime/capi"
     ort_capi.mkdir(parents=True)
     (ort_capi / "onnxruntime.dll").write_bytes(b"runtime")
@@ -89,5 +89,9 @@ def test_nuitka_build_collects_ort_dlls_from_windows_environment(tmp_path):
     with mock.patch.dict(os.environ, {"UV_PROJECT_ENVIRONMENT": ".venv-build"}):
         flags = nuitka_flags.build_flags(tmp_path)
 
-    assert any("onnxruntime.dll=onnxruntime/capi/onnxruntime.dll" in f for f in flags)
+    assert "--include-package=onnxruntime" in flags
+    assert "--include-package-data=onnxruntime" in flags
+    assert not any(
+        "onnxruntime.dll=onnxruntime/capi/onnxruntime.dll" in f for f in flags
+    )
     assert not any("onnxruntime_providers_shared.dll" in flag for flag in flags)
