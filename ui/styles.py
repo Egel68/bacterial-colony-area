@@ -3,10 +3,40 @@
 Содержит CSS-стили для PyQt виджетов.
 """
 
+import re
 
-def get_application_style() -> str:
-    """Возвращает основной стиль приложения."""
-    return """
+
+_DECLARATION_PATTERN = re.compile(r"([a-z-]+)\s*:\s*([^;{}]+);")
+_PIXEL_VALUE_PATTERN = re.compile(r"(-?\d+(?:\.\d+)?)px")
+
+
+def _scale_declaration(match, scale: float, font_scale: float) -> str:
+    property_name, value = match.groups()
+    factor = font_scale if property_name == "font-size" else scale
+
+    def replace_pixel_value(pixel_match):
+        original = float(pixel_match.group(1))
+        scaled = round(original * factor)
+        if property_name == "font-size":
+            scaled = max(12, scaled)
+        elif original > 0:
+            scaled = max(1, scaled)
+        elif original < 0:
+            scaled = min(-1, scaled)
+        return f"{scaled}px"
+
+    return f"{property_name}: {_PIXEL_VALUE_PATTERN.sub(replace_pixel_value, value)};"
+
+
+def get_application_style(scale: float = 1.0, font_scale: float | None = None) -> str:
+    """Возвращает основной стиль с масштабированием размеров в логических px."""
+    if scale <= 0:
+        raise ValueError("Масштаб стилей должен быть положительным")
+    font_scale = max(0.9, scale) if font_scale is None else font_scale
+    if font_scale <= 0:
+        raise ValueError("Масштаб шрифта должен быть положительным")
+
+    style = """
         /* Основное окно */
         QMainWindow, QDialog {
             background-color: #1e1e2e;
@@ -51,6 +81,18 @@ def get_application_style() -> str:
             color: #6c7086;
         }
 
+        QLineEdit[invalid="true"] {
+            border-color: #f38ba8;
+        }
+
+        QLabel[responsiveRole="title"] {
+            font-size: 15px;
+        }
+
+        QLabel[responsiveRole="subtitle"] {
+            font-size: 12px;
+        }
+
         /* Основные кнопки */
         QPushButton {
             background-color: #89b4fa;
@@ -60,7 +102,6 @@ def get_application_style() -> str:
             padding: 12px 24px;
             font-size: 14px;
             font-weight: bold;
-            min-width: 120px;
         }
 
         QPushButton:hover {
@@ -281,6 +322,19 @@ def get_application_style() -> str:
             border-radius: 8px;
         }
     """
+    return scale_stylesheet(style, scale, font_scale)
+
+
+def scale_stylesheet(style: str, scale: float, font_scale: float | None = None) -> str:
+    """Масштабирует px-значения в QSS, сохраняя читаемый минимум шрифта."""
+    if scale <= 0:
+        raise ValueError("Масштаб стилей должен быть положительным")
+    font_scale = max(0.9, scale) if font_scale is None else font_scale
+    if font_scale <= 0:
+        raise ValueError("Масштаб шрифта должен быть положительным")
+    return _DECLARATION_PATTERN.sub(
+        lambda match: _scale_declaration(match, scale, font_scale), style
+    )
 
 
 def get_image_frame_style() -> str:

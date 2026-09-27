@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QBoxLayout,
     QDialog,
     QFileDialog,
     QFrame,
@@ -16,12 +17,14 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .analysis_window import AnalysisWindow
 from .labeling_session_dialog import LabelingSessionDialog
+from .responsive import ResponsiveMetrics, install_application_responsive_sizing
 from utils.image_loader import SUPPORTED_EXTENSIONS
 
 
@@ -32,20 +35,34 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.selected_file_path = None
         self.analysis_window = None
+        self.main_layout = None
+        self.input_layout = None
         self._init_ui()
+        self._responsive_sizer = install_application_responsive_sizing(
+            self, minimum_scale=0.75
+        )
 
     def _init_ui(self):
         """Инициализация пользовательского интерфейса."""
         self.setWindowTitle("Bacteria Colony Analyzer")
-        self.setMinimumSize(900, 500)
-        self.resize(700, 450)
+        self.setMinimumSize(0, 0)
+        # Сохраняем фактический стартовый размер до адаптации: раньше меньший
+        # resize ограничивался минимумом 900×500.
+        self.resize(900, 500)
 
         # Центральный виджет
         central_widget = QWidget()
+        # Минимум из sizeHint не должен блокировать resize с большого окна
+        # обратно до поддерживаемой компактной клиентской области.
+        central_widget.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
         self.setCentralWidget(central_widget)
 
         # Главный layout
         main_layout = QVBoxLayout(central_widget)
+        self.main_layout = main_layout
+        self.input_layout = None
         main_layout.setContentsMargins(40, 30, 40, 30)
         main_layout.setSpacing(20)
 
@@ -53,8 +70,6 @@ class MainWindow(QMainWindow):
         self._create_header(main_layout)
 
         # Разделитель
-        main_layout.addSpacing(10)
-
         # Секция выбора файла
         self._create_file_section(main_layout)
 
@@ -88,6 +103,7 @@ class MainWindow(QMainWindow):
         """Создание секции выбора файла."""
         # Контейнер для выбора файла
         file_frame = QFrame()
+        self.file_frame = file_frame
         file_frame.setStyleSheet("""
             QFrame {
                 background-color: #313244;
@@ -100,11 +116,13 @@ class MainWindow(QMainWindow):
         file_layout.setSpacing(15)
         # Метка
         file_label = QLabel("📁 Путь к изображению:")
-        file_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        file_label.setProperty("responsiveRole", "title")
+        file_label.setStyleSheet("font-weight: bold;")
         file_layout.addWidget(file_label)
 
         # Горизонтальный layout для поля ввода и кнопки
-        input_layout = QHBoxLayout()
+        input_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.input_layout = input_layout
         input_layout.setSpacing(10)
 
         # Поле ввода пути
@@ -118,7 +136,7 @@ class MainWindow(QMainWindow):
         self.open_button = QPushButton("📂 Открыть")
         self.open_button.setObjectName("secondary")
         self.open_button.clicked.connect(self._open_file_dialog)
-        self.open_button.setMinimumWidth(130)
+        self.open_button.setMinimumWidth(0)
         input_layout.addWidget(self.open_button)
 
         file_layout.addLayout(input_layout)
@@ -141,10 +159,8 @@ class MainWindow(QMainWindow):
         self.analyze_button = QPushButton("🔍 Анализировать")
         self.analyze_button.setObjectName("success")
         self.analyze_button.setEnabled(False)
-        self.analyze_button.setMinimumSize(200, 50)
         self.analyze_button.setStyleSheet("""
             QPushButton {
-                font-size: 16px;
                 border-radius: 12px;
             }
         """)
@@ -159,10 +175,8 @@ class MainWindow(QMainWindow):
         label_layout.addStretch()
         self.label_button = QPushButton("✏️ Разметка тестовых изображений")
         self.label_button.setObjectName("secondary")
-        self.label_button.setMinimumSize(260, 40)
         self.label_button.setStyleSheet("""
             QPushButton {
-                font-size: 14px;
                 border-radius: 10px;
             }
         """)
@@ -176,10 +190,8 @@ class MainWindow(QMainWindow):
         testing_layout.addStretch()
         self.testing_button = QPushButton("🧪 Тестирование алгоритмов")
         self.testing_button.setObjectName("secondary")
-        self.testing_button.setMinimumSize(260, 40)
         self.testing_button.setStyleSheet("""
             QPushButton {
-                font-size: 14px;
                 border-radius: 10px;
             }
         """)
@@ -187,6 +199,35 @@ class MainWindow(QMainWindow):
         testing_layout.addWidget(self.testing_button)
         testing_layout.addStretch()
         layout.addLayout(testing_layout)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.main_layout is None:
+            return
+
+        compact = self.contentsRect().width() < 960 or self.contentsRect().height() < 650
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if compact
+            else QBoxLayout.Direction.LeftToRight
+        )
+        if self.input_layout is not None:
+            self.input_layout.setDirection(direction)
+
+        metrics = getattr(self._responsive_sizer, "metrics", None) or ResponsiveMetrics(
+            1.0
+        )
+        if compact:
+            margin_x = metrics.dimension(18, minimum=1)
+            margin_y = metrics.dimension(16, minimum=1)
+            spacing = metrics.dimension(10, minimum=1)
+        else:
+            margin_x = metrics.dimension(40, minimum=1)
+            margin_y = metrics.dimension(30, minimum=1)
+            spacing = metrics.dimension(20, minimum=1)
+
+        self.main_layout.setContentsMargins(margin_x, margin_y, margin_x, margin_y)
+        self.main_layout.setSpacing(spacing)
 
     def _open_labeling(self):
         from labeling import LabelingWindow
@@ -219,11 +260,10 @@ class MainWindow(QMainWindow):
         """Обработка изменения пути к файлу."""
         is_valid = self._validate_file(text)
         self.analyze_button.setEnabled(is_valid)
-
-        if text and not is_valid:
-            self.path_input.setStyleSheet("border-color: #f38ba8;")
-        else:
-            self.path_input.setStyleSheet("")
+        self.path_input.setProperty("invalid", bool(text) and not is_valid)
+        self.path_input.style().unpolish(self.path_input)
+        self.path_input.style().polish(self.path_input)
+        self.path_input.update()
 
     def _validate_file(self, file_path: str) -> bool:
         """Проверка валидности файла."""
