@@ -55,8 +55,10 @@ Thumbs.db
 opencode.json
 
 # Docs (whitelist specific files)
-docs/
+/docs/*
 !docs/testing-quality.md
+!docs/user-guide.md
+!docs/dataset-training-pipeline.md
 
 # Evaluation reports (track JSON, ignore regeneratable HTML)
 evaluations/*/report.html
