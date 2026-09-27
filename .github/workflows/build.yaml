@@ -4,11 +4,18 @@ on:
   pull_request:
     branches:
       - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  # Изменения feature/* проверяются через pull_request (включая synchronize),
+  # чтобы каждый commit не запускал вторую такую же матрицу через push.
   push:
     branches:
       - develop
       - main
-      - feature/*
+  # Позволяет вручную запустить проверку для ветки до открытия PR.
+  workflow_dispatch:
 
 jobs:
   build-executable:
