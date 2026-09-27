@@ -136,20 +136,50 @@ session_dir/
 
 ---
 
-## 🧪 3. Тестирование алгоритмов (CLI)
+## 🧪 3. Тестирование алгоритмов
 
-Сравнение алгоритмов детекции на эталонных изображениях.
+Сравнение алгоритмов детекции на эталонных изображениях. Доступно два способа: GUI-окно в приложении и CLI.
+
+### GUI
+
+В главном окне нажмите «🧪 Тестирование алгоритмов»:
+
+- Выберите папку датасета (`source/` + `masks/`, `cropped/` + `cropped_masks/`).
+- Отметьте алгоритмы для прогона (классические + загруженные модели).
+- «⬇️ Загрузить модель (.onnx)» — подключить внешнюю ONNX-модель без пересборки.
+- Включите «Парное сравнение» для таблицы «победитель по снимку» (A vs B).
+- После запуска — сводные метрики (IoU, Dice, F1, Precision, Recall) и экспорт HTML-отчёта.
+
+### CLI
 
 ```bash
 uv run test-algorithms
-# или:
-uv run test-algorithms --data-root ./test_images --output ./report.html
+# выбор алгоритмов, моделей и опций:
+uv run test-algorithms --data-root ./test_images --output ./report.html \
+  --algorithms ClassicDefault,ClassicSolidFill \
+  --model weights/model.onnx --compare ClassicDefault,ClassicSolidFill \
+  --no-per-snapshot
 ```
 
-- Загружает пары «изображение + маска» из `test_images/`.
-- Прогоняет 4 алгоритма: ClassicDefault, ClassicHighSensitivity, ClassicSolidFill, ClassicLowSensitivity.
+- Загружает пары «изображение + маска» из датасета (по умолчанию `test_images/`).
+- Прогоняет алгоритмы: ClassicDefault, ClassicHighSensitivity, ClassicSolidFill, ClassicLowSensitivity (по умолчанию все).
+- `--algorithms` — список имён через запятую.
+- `--model` — подключить внешнюю ONNX-модель как алгоритм (можно повторять).
+- `--compare A,B` — раздел «победитель по каждому снимку».
+- `--per-snapshot` / `--no-per-snapshot` — включать/скрывать детальные по-сним метрики.
 - Считает метрики: IoU, Dice, F1, Precision, Recall, Accuracy.
 - Генерирует HTML-отчёт с графиками Chart.js.
+
+### Подключение нейросетевых моделей
+
+Модели подключаются как обычные алгоритмы через интерфейс `BaseDetectionAlgorithm`:
+
+- **Внешние веса** — файл `.onnx` выбирается в GUI или через `--model`, без пересборки приложения.
+- **Встроенные веса** — файл `*.onnx` из папки `models/` попадает в бинарник при сборке
+  (Nuitka `--include-data-files=models/*.onnx=models/`) и регистрируется автоматически при запуске.
+
+Для инференса используется `onnxruntime` (ленивый импорт). Без него приложение работает,
+а нейросетевые алгоритмы недоступны с понятным сообщением об ошибке.
 
 ---
 

@@ -12,6 +12,19 @@ from testing.dashboard import generate_report
 from testing.dataset import TestDataset
 from testing.runner import run_algorithm, _mean_metrics
 
+_SAMPLE_METRICS = {
+    "iou": 0.9,
+    "dice": 0.95,
+    "f1": 0.95,
+    "precision": 1.0,
+    "recall": 0.9,
+    "accuracy": 0.99,
+    "tp": 90,
+    "fp": 0,
+    "fn": 10,
+    "tn": 900,
+}
+
 
 class TestAlgorithmsRun:
     @pytest.mark.parametrize(
@@ -124,3 +137,42 @@ class TestGenerateReport:
         text = (tmp_path / "report.html").read_text(encoding="utf-8")
         assert "ClassicDefault" in text
         assert "0.9000" in text
+
+    def test_report_without_per_snapshot_hides_tables(self, tmp_path):
+        all_results = {
+            "ClassicDefault": {
+                "sample1": {
+                    "source": _SAMPLE_METRICS,
+                }
+            }
+        }
+        out = str(tmp_path / "report.html")
+        generate_report(all_results, output_path=out, include_per_snapshot=False)
+        text = (tmp_path / "report.html").read_text(encoding="utf-8")
+        assert "sample1" not in text
+        assert "ClassicDefault" in text
+
+    def test_report_with_comparison_includes_winner_table(self, tmp_path):
+        all_results = {
+            "ClassicDefault": {"sample1": {"source": _SAMPLE_METRICS}},
+            "ClassicSolidFill": {"sample1": {"source": _SAMPLE_METRICS}},
+        }
+        comparison = {
+            "iou": {
+                "sample1": {"source": "a"},
+            },
+            "dice": {
+                "sample1": {"source": "tie"},
+            },
+        }
+        out = str(tmp_path / "report.html")
+        generate_report(
+            all_results,
+            output_path=out,
+            include_per_snapshot=False,
+            comparison=comparison,
+        )
+        text = (tmp_path / "report.html").read_text(encoding="utf-8")
+        assert "Сравнение: IoU" in text
+        assert "<b>A</b>" in text
+        assert "<b>Ничья</b>" in text

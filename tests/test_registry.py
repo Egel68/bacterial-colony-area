@@ -1,10 +1,25 @@
 import pytest
 
+from testing.interface import BaseDetectionAlgorithm
 from testing.registry import (
     get_algorithm,
     list_algorithms,
     get_algorithm_descriptions,
+    register_algorithm_instance,
 )
+
+
+class _FakeInstance(BaseDetectionAlgorithm):
+    name = "FakeInstance"
+    description = "Фиктивный экземпляр алгоритма"
+    detects = 0
+
+    def detect(self, image, is_cropped=False):
+        _FakeInstance.detects += 1
+        import numpy as np
+
+        h, w = image.shape[:2]
+        return np.zeros((h, w), dtype=np.uint8)
 
 
 def test_list_contains_expected():
@@ -43,7 +58,7 @@ class TestDescriptions:
             assert isinstance(name, str)
             assert isinstance(desc, str)
 
-    def test_includes_all_algorithms(self):
+    def test_includes_all_class_names(self):
         descs = get_algorithm_descriptions()
         names = {d[0] for d in descs}
         assert names == {
@@ -52,3 +67,34 @@ class TestDescriptions:
             "ClassicSolidFill",
             "ClassicLowSensitivity",
         }
+
+
+class TestInstances:
+    @pytest.fixture(autouse=True)
+    def _cleanup(self):
+        yield
+        from testing.registry import _INSTANCES
+
+        _INSTANCES.pop("FakeInstance", None)
+
+    def test_register_and_get_instance(self):
+        instance = _FakeInstance()
+        register_algorithm_instance("FakeInstance", instance)
+        got = get_algorithm("FakeInstance")
+        assert got is instance
+
+    def test_registered_instance_is_listed(self):
+        register_algorithm_instance("FakeInstance", _FakeInstance())
+        names = list_algorithms()
+        assert "FakeInstance" in names
+        assert "ClassicDefault" in names
+
+    def test_instance_descriptions_included(self):
+        register_algorithm_instance("FakeInstance", _FakeInstance())
+        descs = dict(get_algorithm_descriptions())
+        assert "FakeInstance" in descs
+
+    def test_unknown_after_instance_registration_raises(self):
+        register_algorithm_instance("FakeInstance", _FakeInstance())
+        with pytest.raises(ValueError, match="Unknown algorithm"):
+            get_algorithm("StillMissing")

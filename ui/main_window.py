@@ -171,6 +171,23 @@ class MainWindow(QMainWindow):
         label_layout.addStretch()
         layout.addLayout(label_layout)
 
+        # Кнопка тестирования алгоритмов
+        testing_layout = QHBoxLayout()
+        testing_layout.addStretch()
+        self.testing_button = QPushButton("🧪 Тестирование алгоритмов")
+        self.testing_button.setObjectName("secondary")
+        self.testing_button.setMinimumSize(260, 40)
+        self.testing_button.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                border-radius: 10px;
+            }
+        """)
+        self.testing_button.clicked.connect(self._open_testing)
+        testing_layout.addWidget(self.testing_button)
+        testing_layout.addStretch()
+        layout.addLayout(testing_layout)
+
     def _open_labeling(self):
         from labeling import LabelingWindow
         from labeling.session_manager import SessionManager
@@ -180,6 +197,12 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.session_dir:
             self.labeling_window = LabelingWindow(dialog.session_dir, self)
             self.labeling_window.show()
+
+    def _open_testing(self):
+        from .testing_window import TestingWindow
+
+        self.testing_window = TestingWindow(self)
+        self.testing_window.show()
 
     def _open_file_dialog(self):
         """Открытие диалога выбора файла."""

@@ -16,6 +16,7 @@ class TrainingConfig:
     patience: int = 30
     augment: bool = True
     model_name: str = "unet"
+    architectures: tuple[str, ...] = ("unet",)
     run_dir: Path = Path("train/runs")
     device: str = "cuda"
     dashboard: bool = False

@@ -30,6 +30,14 @@ def build_flags(root: Path) -> list[str]:
     )
     flags = [f"--include-package={p}" for p in packages]
     flags.append("--enable-plugin=pyqt6")
+
+    # Встроенные ONNX-модели: кладём весь каталог models/*.onnx в бинарник.
+    models_dir = root / "models"
+    if models_dir.is_dir():
+        onnx_files = sorted(models_dir.glob("*.onnx"))
+        if onnx_files:
+            flags.append("--include-data-files=models/*.onnx=models/")
+
     return flags
 
 
