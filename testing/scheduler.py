@@ -117,7 +117,7 @@ def iter_batches(
         except Exception as exc:
             if telemetry:
                 telemetry.record_error(str(exc))
-                telemetry.record_task(load_failed=1)
+                telemetry.record_task(failed=1)
             log.error("Unable to load %s/%s: %s", ref.name, ref.variant, exc)
             continue
         load_time = time.perf_counter() - started
