@@ -9,14 +9,16 @@ import platform
 import subprocess
 from collections import defaultdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
-from .dataset import ColonyPatchDataset, make_test_dataset
 from .dataset_adapters import load_manifest
-from .dataset_manifest import SampleRecord
-from .models.base import BaseSegmenter
+
+if TYPE_CHECKING:
+    from .dataset_manifest import SampleRecord
+    from .models.base import BaseSegmenter
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +164,8 @@ def evaluate_test_subset(
     stride: int = 384,
     limit: int | None = None,
 ) -> dict[str, object]:
+    from .dataset import make_test_dataset
+
     dataset = make_test_dataset(data_root, tile_size)
     if not dataset.records:
         raise ValueError("No test subset found in the manifest")
@@ -188,6 +192,8 @@ def evaluate_patch_records(
     """Оценить фиксированные патчи выбранных записей сгруппированно по исходнику."""
     import torch
     from torch.utils.data import DataLoader
+
+    from .dataset import ColonyPatchDataset
 
     dataset = ColonyPatchDataset(
         records,
@@ -265,6 +271,7 @@ def verify_onnx_cpu_parity(
     import torch
 
     import onnxruntime
+    from .dataset import ColonyPatchDataset
 
     validation_records = [record for record in records if record.subset == "val"]
     if not validation_records:

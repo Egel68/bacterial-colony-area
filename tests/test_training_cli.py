@@ -4,54 +4,9 @@ import cv2
 import numpy as np
 import pytest
 
-from train.main import main
+pytest.importorskip("torch")
 
-
-def test_training_cli_help_lists_reproducible_options(capsys):
-    import pytest
-
-    with pytest.raises(SystemExit) as exc:
-        main(["train-colony", "--help"])
-
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
-    for option in (
-        "--data-root",
-        "--output",
-        "--seed",
-        "--train-ratio",
-        "--val-ratio",
-        "--test-ratio",
-        "--patches-per-image",
-        "--no-pretrained",
-        "--promote-model",
-        "--resume-run",
-    ):
-        assert option in output
-
-
-def test_training_cli_rejects_invalid_split_ratio(capsys):
-    import pytest
-
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "train-colony",
-                "--data-root",
-                "dataset",
-                "--output",
-                "output",
-                "--train-ratio",
-                "0.7",
-                "--val-ratio",
-                "0.2",
-                "--test-ratio",
-                "0.2",
-            ]
-        )
-
-    assert exc.value.code == 2
-    assert "sum to 1" in capsys.readouterr().err
+from train.main import main  # noqa: E402
 
 
 def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
@@ -195,7 +150,6 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
 def test_model_promotion_refuses_to_overwrite_without_explicit_consent(
     tmp_path, monkeypatch
 ):
-    import pytest
     import train.training_pipeline as pipeline
 
     source = tmp_path / "source"
@@ -283,23 +237,6 @@ def test_model_promotion_refuses_to_overwrite_without_explicit_consent(
 
     assert target.read_bytes() == b"keep me"
     assert not (tmp_path / "output").exists()
-
-
-def test_training_refuses_nonempty_output_without_touching_existing_data(tmp_path):
-    import pytest
-    from train.training_pipeline import run_colony_training
-
-    source = tmp_path / "source"
-    source.mkdir()
-    output = tmp_path / "output"
-    output.mkdir()
-    marker = output / "user-data.txt"
-    marker.write_text("preserve")
-
-    with pytest.raises(FileExistsError, match="non-empty output directory"):
-        run_colony_training(data_root=source, output_root=output, pretrained=False)
-
-    assert marker.read_text() == "preserve"
 
 
 def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(

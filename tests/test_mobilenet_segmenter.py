@@ -1,10 +1,11 @@
 """Тесты компактного MobileNetV3-Small segmenter."""
 
 import pytest
-import train.models as model_registry
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
+
+import train.models as model_registry  # noqa: E402
 
 
 def test_mobilenet_segmenter_is_registered_and_returns_512_logits():

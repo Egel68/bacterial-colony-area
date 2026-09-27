@@ -9,16 +9,15 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import TrainingConfig
-from .dataset import make_datasets
-from .models import list_models
-from .reporter import generate_report
-from .train import run_training
 from utils.logging import setup_logging
 
 log = logging.getLogger(__name__)
 
 
 def _train(args):
+    from .reporter import generate_report
+    from .train import run_training
+
     cfg = TrainingConfig(
         model_name=args.model,
         epochs=args.epochs,
@@ -126,11 +125,15 @@ def _train_compare(args):
 
 
 def _list_models(_):
+    from .models import list_models
+
     for name in list_models():
         log.info("  %s", name)
 
 
 def _dataset_info(_):
+    from .dataset import make_datasets
+
     cfg = TrainingConfig()
     train_ds, val_ds = make_datasets(
         cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment
@@ -140,8 +143,6 @@ def _dataset_info(_):
 
 
 def _train_colony(args, parser):
-    from .training_pipeline import run_colony_training
-
     ratios = (args.train_ratio, args.val_ratio, args.test_ratio)
     if any(ratio <= 0 for ratio in ratios) or not math.isclose(sum(ratios), 1.0):
         parser.error("Train/validation/test ratios must be positive and sum to 1")
@@ -151,6 +152,8 @@ def _train_colony(args, parser):
         parser.error(
             "Native-resolution patch training currently requires --img-size 512"
         )
+
+    from .training_pipeline import run_colony_training
 
     run_colony_training(
         data_root=Path(args.data_root),

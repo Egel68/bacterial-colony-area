@@ -24,9 +24,15 @@ from .evaluation import (
     evaluate_test_subset,
     verify_onnx_cpu_parity,
 )
-from .train import run_training
 
 log = logging.getLogger(__name__)
+
+
+def run_training(*args, **kwargs):
+    """Загрузить PyTorch-цикл только при фактическом запуске обучения."""
+    from .train import run_training as torch_run_training
+
+    return torch_run_training(*args, **kwargs)
 
 
 def _tree_signature(root: Path) -> str:

@@ -2,8 +2,8 @@
 
 import sys
 
-from .main import main as training_main
-
 
 def main() -> None:
+    from .main import main as training_main
+
     training_main(["train-colony", *sys.argv[1:]])
