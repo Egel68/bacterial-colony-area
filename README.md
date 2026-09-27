@@ -628,10 +628,12 @@ bacterial-colony-area/
 | Файл | О чём |
 |---|---|
 | [docs/user-guide.md](docs/user-guide.md) | **Полное руководство**: GUI по шагам, все CLI-флаги, форматы данных, обучение, сборка, ограничения |
+| [docs/architecture.md](docs/architecture.md) | **Архитектура кода**: слои, модули, сигнатуры, потоки данных, точки расширения, подводные камни |
+| [docs/algorithms.md](docs/algorithms.md) | **Алгоритмы детекции**: классика и ONNX-адаптеры, контракт модели, как добавить свой алгоритм |
 | [docs/dataset-training-pipeline.md](docs/dataset-training-pipeline.md) | Путь от сырого COCO-датасета до обученной модели в приложении |
-| [docs/testing-quality.md](docs/testing-quality.md) | Метрики, реестр алгоритмов, кэширование, telemetry, структура отчётов |
+| [docs/testing-quality.md](docs/testing-quality.md) | Метрики, реестр алгоритмов, батчи и потоки, кэширование, telemetry, структура отчётов |
 | [models/README.md](models/README.md) | Как добавить свою ONNX-модель в `models/` |
-| [AGENTS.md](AGENTS.md) | Архитектура и правила работы с репозиторием (для ИИ-агентов и контрибьюторов) |
+| [AGENTS.md](AGENTS.md) | Правила работы с репозиторием (для ИИ-агентов и контрибьюторов) |
 
 ---
 

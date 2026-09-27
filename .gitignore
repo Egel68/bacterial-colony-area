@@ -59,6 +59,8 @@ opencode.json
 !docs/testing-quality.md
 !docs/user-guide.md
 !docs/dataset-training-pipeline.md
+!docs/architecture.md
+!docs/algorithms.md
 
 # Evaluation reports (track JSON, ignore regeneratable HTML)
 evaluations/*/report.html
