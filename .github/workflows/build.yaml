@@ -60,17 +60,15 @@ jobs:
       - name: Create clean runtime environment for build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          rm -rf .venv-build
-          UV_PROJECT_ENVIRONMENT=.venv-build uv sync
+          UV_PROJECT_ENVIRONMENT=.venv-build uv sync --locked --exact
           uv pip install --python .venv-build nuitka zstandard
 
       - name: Create clean runtime environment for build (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          if (Test-Path .venv-build) { Remove-Item -Recurse -Force .venv-build }
           $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
-          uv sync
+          uv sync --locked --exact
           uv pip install --python .venv-build nuitka zstandard
 
       - name: Build executable (Linux)
@@ -80,6 +78,12 @@ jobs:
             --standalone --onefile \
             --output-filename=BacteriaAnalyzer \
             main.py
+
+      - name: Verify packaged CPU inference (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          ./BacteriaAnalyzer --smoke-test-model NN:colony_seg
+          ./BacteriaAnalyzer --smoke-test-model NN:colony_mobilenet_v3_small
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
@@ -94,6 +98,13 @@ jobs:
             --windows-icon-from-ico=icon.ico `
             --output-filename=BacteriaAnalyzer.exe `
             main.py
+
+      - name: Verify packaged CPU inference (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          .\BacteriaAnalyzer.exe --smoke-test-model NN:colony_seg
+          .\BacteriaAnalyzer.exe --smoke-test-model NN:colony_mobilenet_v3_small
 
       - name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-latest'

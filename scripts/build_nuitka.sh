@@ -14,8 +14,7 @@ fi
 # чтобы НЕ загрязнять .venv / .venv-dev dev- и ML-пакетами.
 # .venv-build содержит только runtime-зависимости + инструменты сборки (nuitka, zstandard).
 echo "=== Создание чистого build-окружения .venv-build ==="
-rm -rf .venv-build
-UV_PROJECT_ENVIRONMENT=.venv-build uv sync
+UV_PROJECT_ENVIRONMENT=.venv-build uv sync --locked --exact
 UV_PROJECT_ENVIRONMENT=.venv-build uv pip install --python .venv-build nuitka zstandard
 
 echo "=== Запуск Nuitka ==="

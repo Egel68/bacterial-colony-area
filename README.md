@@ -22,14 +22,14 @@
 Требуется Python 3.13+ и [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Runtime-окружение (~475 МБ) — для запуска приложения
+# Runtime-окружение — запуск приложения и CPU ONNX-инференс (без PyTorch)
 uv sync
 uv run bacteria-analyzer
 
-# Dev-окружение без ML (~530 МБ) — для тестирования и сборки бинарника
+# Dev-окружение — тесты и инструменты сборки, без PyTorch
 UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev
 
-# Полное окружение (~5 ГБ) — для обучения нейросети
+# Полное окружение — обучение (PyTorch/torchvision) и CPU ONNX-инференс
 UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
 source .venv-full/bin/activate
 ```
@@ -45,6 +45,9 @@ source .venv-full/bin/activate
 1. Нажмите **«📂 Открыть»** и выберите изображение (PNG, JPG, BMP, TIFF, WebP).
 2. Нажмите **«🔍 Анализировать»**.
 3. Откроется окно анализа с изображением и панелью параметров.
+4. В списке «Алгоритм распознавания» можно выбрать классический режим или
+   зарегистрированную модель. Встроенная MobileNet обрабатывает полный кадр
+   перекрывающимися тайлами на CPU; классические настройки недоступны для NN.
 
 ### Параметры
 
@@ -178,8 +181,42 @@ uv run test-algorithms --data-root ./test_images --output ./report.html \
 - **Встроенные веса** — файл `*.onnx` из папки `models/` попадает в бинарник при сборке
   (Nuitka `--include-data-files=models/*.onnx=models/`) и регистрируется автоматически при запуске.
 
-Для инференса используется `onnxruntime` (ленивый импорт). Без него приложение работает,
-а нейросетевые алгоритмы недоступны с понятным сообщением об ошибке.
+Для inference используется ONNX Runtime CPU, входящий в базовые зависимости приложения.
+PyTorch/torchvision нужны только для обучения в `.venv-full` и не попадают в runtime/build.
+Обучение автоматически использует CUDA, если доступна видеокарта; на RTX 2060 это
+отдельно отражается в training summary. ONNX parity-проверка, CPU benchmark и всё
+производственное распознавание выполняются только через `CPUExecutionProvider`.
+Модель `NN:colony_mobilenet_v3_small` использует тайлы 512×512 с шагом 384 px;
+окно анализа показывает прогресс и выполняет её асинхронно. Фактическая скорость
+зависит от CPU и размера исходного снимка.
+
+### Обучение bundled-сегментатора
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync python -m train.main train-colony \
+  --data-root datasets/22022540 \
+  --output datasets/22022540_training \
+  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 8 --patches-per-image 4 --cpu-benchmark
+```
+
+Команда не изменяет источник, сохраняет split, checkpoint и `report.json` в output.
+Она оценивает test после выбора лучшей эпохи по validation. Чтобы отдельно продвинуть
+проверенный ONNX, укажите `--promote-model models/colony_mobilenet_v3_small.onnx`;
+существующий файл без `--allow-overwrite` не заменяется. COCO bbox rasterized masks
+являются weak labels и не равны точным вручную размеченным границам колоний.
+
+### Проверенный запуск MobileNetV3-Small (2026-09-27)
+
+- Датасет: 369 исходных снимков, seed 42, stratified split 253/62/54; все 24 категории представлены в каждом subset. Исходная COCO-аннотация не изменена.
+- Обучение: NVIDIA RTX 2060 Max-Q, CUDA, 512×512 patches, batch 8, 4 patches/source image; best checkpoint выбран на epoch 38 из 59, validation IoU 0.7021 / Dice 0.8167. Средняя эпоха — 34.0 с (6 из 59 превысили 60 с, максимум 77.8 с).
+- Инициализация: основной run (59 эпох) выполнен на legacy weight-only checkpoint из предыдущего трёхэпохового run (SHA-256 хранится в `report.json`); optimizer state отсутствовал, использован warm-start. Предыдущий одноэпоховый эксперимент отдельно документирует `pretrained=true` и официальный torchvision MobileNetV3-Small checkpoint (`mobilenet_v3_small-047dcff4.pth`, SHA-256 `047dcff4addef86ea5bc2eff13c9614dc11f47ab1160d0a71a25e7db994f4e1f`). У weight-only checkpoint точная ancestry не сохранена; поэтому отчёт различает `pretrained_requested` и доказуемую provenance, не выдавая warm-start за полный resume.
+- Однократная held-out оценка после заморозки checkpoint: ONNX CPU tiled full-resolution на всех 54 test-снимках — IoU 0.6925, Dice 0.8104, precision 0.8473, recall 0.8063.
+- CPU benchmark: AMD Ryzen 7 4800HS, 12 logical cores, OpenCV 12 threads; исходники 2122–3039×2144–3015, 36–64 тайла на изображение, 3 warm-up; median 4.79 с, p95 7.70 с на 51 измеряемом снимке.
+- Экспорт checkpoint: отдельный ONNX-файл размером 4,270,662 bytes, SHA-256 `2874466687738cffa26da007a60ca4f61d733888eb8114d0862a0af9ca90187c`. На 124 фиксированных validation patches (32,505,856 pixels) ONNX Runtime `CPUExecutionProvider` дал max probability difference `1.28e-5` (tolerance `1e-4`), max logit difference `1.81e-4` (tolerance `2e-4`), один пограничный threshold disagreement.
+- Полный JSON с per-image метриками и latency создаётся в `<output>/runs/<run>/report.json`; сохранённый отчёт этого запуска находится рядом с checkpoint-ами в каталоге запуска.
+- Маски импортированы как вписанные эллипсы по COCO bounding boxes и являются weak labels, а не вручную размеченными точными контурами колоний.
 
 ---
 
@@ -187,10 +224,19 @@ uv run test-algorithms --data-root ./test_images --output ./report.html \
 
 ```bash
 bash scripts/build_nuitka.sh
-# Результат: ./BacteriaAnalyzer (~85–125 МБ)
+# Результат: ./BacteriaAnalyzer (размер зависит от PyQt6, OpenCV, ONNX Runtime и моделей)
 ```
 
-Сборка всегда идёт из изолированного build-окружения `.venv-build` (создаётся ad-hoc: runtime-зависимости `PyQt6`, `opencv-python-headless`, `numpy` + инструменты сборки `nuitka`, `zstandard`). `.venv`/`.venv-dev`/`.venv-full` при этом не изменяются.
+Сборка всегда идёт из изолированного build-окружения `.venv-build` (создаётся ad-hoc:
+runtime-зависимости `PyQt6`, `opencv-python-headless`, `numpy`, `onnxruntime` CPU плюс
+`nuitka`/`zstandard`). `.venv`/`.venv-dev`/`.venv-full` при этом не изменяются.
+
+Проверенная Linux onefile-сборка от 2026-09-27 (Nuitka 4.2.2, ONNX Runtime 1.27.0,
+обе bundled-модели) занимает **170,221,056 bytes (162.3 MiB)**; контрольный диапазон
+для этой конфигурации — 155–175 MiB. Headless smoke test
+обеих моделей прошёл с `CPUExecutionProvider` в чистом build-окружении без PyTorch;
+standalone executable внутри `main.dist` — 61,191,088 bytes, вместе с зависимостями
+каталог standalone занимает около 499 MiB.
 
 ---
 

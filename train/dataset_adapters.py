@@ -26,6 +26,7 @@ from .dataset_manifest import (
     SampleRecord,
     StorageMode,
 )
+from .dataset_split import DEFAULT_SPLIT_RATIOS, stratified_group_split
 
 SUPPORTED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 
@@ -220,6 +221,9 @@ class CocoBboxImporter(BaseAdapter):
         data_root: Path,
         output_dir: Optional[Path] = None,
         crop: bool = False,
+        split: bool = False,
+        seed: int = 42,
+        split_ratios: tuple[float, float, float] = DEFAULT_SPLIT_RATIOS,
     ) -> DatasetManifest:
         """Запуск импорта по корню источника в `output_dir`.
 
@@ -229,11 +233,24 @@ class CocoBboxImporter(BaseAdapter):
         import json
 
         source = Path(data_root)
+        if not source.is_dir():
+            raise NotADirectoryError(f"COCO source directory does not exist: {source}")
         coco_path = source / "annot_COCO.json"
         if not coco_path.is_file():
             raise FileNotFoundError(f"annot_COCO.json not found in {source}")
 
         out = Path(output_dir) if output_dir else Path(f"{source}_imported")
+        if split:
+            source_resolved = source.resolve()
+            output_resolved = out.resolve()
+            if (
+                output_resolved == source_resolved
+                or source_resolved in output_resolved.parents
+                or output_resolved in source_resolved.parents
+            ):
+                raise ValueError(
+                    "Split import output must be disjoint from the read-only source"
+                )
         out.mkdir(parents=True, exist_ok=True)
 
         raw = json.loads(coco_path.read_text(encoding="utf-8"))
@@ -246,6 +263,26 @@ class CocoBboxImporter(BaseAdapter):
                 (ann.get("category_id", 1), list(ann["bbox"]))
             )
 
+        group_labels: dict[str, str] = {}
+        if split:
+            for image_id, image_meta in images_by_id.items():
+                if not boxes_by_image.get(image_id):
+                    continue
+                category_ids = {
+                    category_id for category_id, _ in boxes_by_image[image_id]
+                }
+                if len(category_ids) != 1:
+                    raise ValueError(
+                        f"Expected one category per source image {image_id}, "
+                        f"found {sorted(category_ids)}"
+                    )
+                group_labels[str(image_id)] = str(next(iter(category_ids)))
+            assignments = stratified_group_split(
+                group_labels, seed=seed, ratios=split_ratios
+            )
+        else:
+            assignments = {}
+
         samples: list[SampleRecord] = []
         processed = 0
         for image_id, image_meta in images_by_id.items():
@@ -256,10 +293,16 @@ class CocoBboxImporter(BaseAdapter):
             filename = image_meta["file_name"]
             src_img = source / filename
             if not src_img.is_file():
+                if split:
+                    raise FileNotFoundError(
+                        f"Source image referenced by COCO is missing: {src_img}"
+                    )
                 continue
 
             image = cv2.imread(str(src_img))
             if image is None:
+                if split:
+                    raise ValueError(f"Could not decode COCO source image: {src_img}")
                 continue
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -279,6 +322,7 @@ class CocoBboxImporter(BaseAdapter):
                     kind=SampleKind.SOURCE.value,
                     image=rel_img,
                     mask=rel_mask,
+                    subset=(assignments.get(str(image_id)) if split else None),
                     dish=(
                         DishGeometry(cx=dish["cx"], cy=dish["cy"], r=dish["r"])
                         if dish
@@ -297,11 +341,18 @@ class CocoBboxImporter(BaseAdapter):
                         kind=SampleKind.CROPPED.value,
                         image=rel_img_c,
                         mask=rel_mask_c,
+                        subset=(assignments.get(str(image_id)) if split else None),
                         dish=DishGeometry(cx=dish["cx"], cy=dish["cy"], r=dish["r"]),
                     )
                 )
 
             processed += 1
+
+        if split and processed != len(assignments):
+            raise RuntimeError(
+                f"Split assigned {len(assignments)} annotated images but imported "
+                f"{processed}; refusing to write an incomplete split dataset"
+            )
 
         manifest = DatasetManifest(
             name=out.name,
@@ -311,7 +362,62 @@ class CocoBboxImporter(BaseAdapter):
             samples=samples,
         )
         self._write_dataset_json(out, manifest)
+        if split:
+            self._write_split_json(
+                out,
+                seed=seed,
+                ratios=split_ratios,
+                assignments=assignments,
+                images_by_id=images_by_id,
+                boxes_by_image=boxes_by_image,
+            )
         return manifest
+
+    def _write_split_json(
+        self,
+        out: Path,
+        *,
+        seed: int,
+        ratios: tuple[float, float, float],
+        assignments: dict[str, str],
+        images_by_id: dict,
+        boxes_by_image: dict,
+    ) -> None:
+        """Записывает стабильное распределение исходников и параметры split."""
+        import json
+
+        payload = {
+            "seed": seed,
+            "ratios": dict(zip(("train", "val", "test"), ratios, strict=True)),
+            "strategy": "stratified_source_image_id",
+            "groups": {
+                subset: [
+                    {
+                        "image_id": image_id,
+                        "sample_id": Path(
+                            images_by_id[int(image_id)]["file_name"]
+                        ).stem,
+                        "category_id": next(
+                            iter(
+                                {
+                                    category_id
+                                    for category_id, _ in boxes_by_image[int(image_id)]
+                                }
+                            )
+                        ),
+                    }
+                    for image_id, assigned_subset in sorted(
+                        assignments.items(), key=lambda item: int(item[0])
+                    )
+                    if assigned_subset == subset
+                ]
+                for subset in ("train", "val", "test")
+            },
+        }
+        (out / "split.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _write_source(
         self,

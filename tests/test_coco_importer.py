@@ -1,6 +1,7 @@
 """Тесты импортёра датасета 22022540 (CocoBboxImporter)."""
 
 import json
+import hashlib
 
 import cv2
 import numpy as np
@@ -67,6 +68,22 @@ def _make_source(root):
     return root
 
 
+def _add_third_annotated_image(src):
+    coco_path = src / "annot_COCO.json"
+    coco = json.loads(coco_path.read_text(encoding="utf-8"))
+    coco["annotations"].append(
+        {
+            "id": 4,
+            "image_id": 3,
+            "bbox": [40, 30, 15, 15],
+            "category_id": 1,
+            "area": 225,
+            "iscrowd": False,
+        }
+    )
+    coco_path.write_text(json.dumps(coco), encoding="utf-8")
+
+
 def test_importer_materializes_manifest(tmp_path):
     src = _make_source(tmp_path)
     out = tmp_path / "out"
@@ -120,3 +137,88 @@ def test_importer_cropped_variant(tmp_path):
     assert all(
         s.kind != "cropped" or (out / s.mask).is_file() for s in manifest.samples
     )
+
+
+def test_importer_persists_deterministic_split_without_changing_source(tmp_path):
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    source_bytes = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in src.iterdir()
+        if path.is_file()
+    }
+    out_a = tmp_path / "out-a"
+    out_b = tmp_path / "out-b"
+
+    manifest_a = CocoBboxImporter().build(
+        data_root=src, output_dir=out_a, split=True, seed=42
+    )
+    manifest_b = CocoBboxImporter().build(
+        data_root=src, output_dir=out_b, split=True, seed=42
+    )
+
+    assignments_a = {sample.id: sample.subset for sample in manifest_a.samples}
+    assignments_b = {sample.id: sample.subset for sample in manifest_b.samples}
+    assert assignments_a == assignments_b
+    assert set(assignments_a.values()) <= {"train", "val", "test"}
+    assert all(assignments_a.values())
+    assert json.loads((out_a / "split.json").read_text()) == json.loads(
+        (out_b / "split.json").read_text()
+    )
+    assert {sample.id for sample in load_manifest(out_a).samples} == set(assignments_a)
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in src.iterdir()
+        if path.is_file()
+    } == source_bytes
+
+
+def test_importer_split_keeps_source_and_cropped_records_in_same_subset(
+    tmp_path, monkeypatch
+):
+    import train.dataset_adapters as adapters
+
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    monkeypatch.setattr(
+        adapters, "_find_dish", lambda image: {"cx": 60, "cy": 50, "r": 45}
+    )
+    out = tmp_path / "out"
+
+    manifest = CocoBboxImporter().build(
+        data_root=src, output_dir=out, crop=True, split=True
+    )
+
+    for sample in manifest.samples:
+        if sample.kind != "cropped":
+            continue
+        source_id = sample.id.removesuffix("_cropped")
+        source_record = next(item for item in manifest.samples if item.id == source_id)
+        assert sample.subset == source_record.subset
+
+
+def test_split_import_rejects_incomplete_source_images(tmp_path, monkeypatch):
+    import pytest
+
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    (src / "sp02_img02.jpg").unlink()
+    out = tmp_path / "out"
+
+    with pytest.raises(FileNotFoundError, match="referenced by COCO is missing"):
+        CocoBboxImporter().build(data_root=src, output_dir=out, split=True)
+
+    assert not (out / "dataset.json").exists()
+
+
+def test_split_import_rejects_output_nested_under_read_only_source(tmp_path):
+    import pytest
+
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    out = src / "generated"
+
+    with pytest.raises(ValueError, match="must be disjoint"):
+        CocoBboxImporter().build(data_root=src, output_dir=out, split=True)
+
+    assert not out.exists()

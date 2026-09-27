@@ -1,6 +1,7 @@
 """ONNX-адаптер: нейросетевая модель как алгоритм детекции колоний."""
 
 from pathlib import Path
+import sys
 
 import cv2
 import numpy as np
@@ -57,7 +58,9 @@ class OnnxModelAlgorithm(BaseDetectionAlgorithm):
                 "нейросетевых моделей: uv pip install onnxruntime"
             ) from e
 
-        self._session = onnxruntime.InferenceSession(self.model_path)
+        self._session = onnxruntime.InferenceSession(
+            self.model_path, providers=["CPUExecutionProvider"]
+        )
         return self._session
 
     def detect(self, image: np.ndarray, is_cropped: bool = False) -> np.ndarray:
@@ -87,14 +90,36 @@ def scan_bundled_models(models_dir: str = "") -> list["OnnxModelAlgorithm"]:
     models_dir по умолчанию — подпапка models/ рядом с пакетом testing.
     """
     if not models_dir:
-        default = Path(__file__).resolve().parent.parent / "models"
-        models_dir = str(default)
+        models_dir = str(_default_models_dir())
     path = Path(models_dir)
     if not path.is_dir():
         return []
 
     algos = []
     for model_file in sorted(path.glob("*.onnx")):
+        if model_file.stem == "colony_mobilenet_v3_small":
+            from .tiled_onnx_algorithm import TiledOnnxModelAlgorithm
+
+            algos.append(
+                TiledOnnxModelAlgorithm(
+                    model_path=str(model_file),
+                    name=f"NN:{model_file.stem}",
+                    description=(
+                        "MobileNetV3-Small: CPU-инференс на полном разрешении, "
+                        "с перекрывающимися тайлами"
+                    ),
+                )
+            )
+            continue
+        if model_file.stem == "colony_seg":
+            algos.append(
+                OnnxModelAlgorithm(
+                    model_path=str(model_file),
+                    name="NN:colony_seg",
+                    description=f"Legacy ONNX-модель: {model_file.name}",
+                )
+            )
+            continue
         algos.append(
             OnnxModelAlgorithm(
                 model_path=str(model_file),
@@ -103,6 +128,21 @@ def scan_bundled_models(models_dir: str = "") -> list["OnnxModelAlgorithm"]:
             )
         )
     return algos
+
+
+def _default_models_dir() -> Path:
+    """Найти data-файлы рядом с исходниками, PyInstaller или Nuitka onefile."""
+    compiled = globals().get("__compiled__")
+    containing_dir = getattr(compiled, "containing_dir", None)
+    if containing_dir:
+        if getattr(compiled, "onefile", False):
+            # В onefile __compiled__.containing_dir указывает на каталог самого
+            # бинарника; bundled data лежат рядом с временным sys.executable.
+            return Path(sys.executable).resolve().parent / "models"
+        return Path(containing_dir) / "models"
+    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+        return Path(sys._MEIPASS) / "models"
+    return Path(__file__).resolve().parent.parent / "models"
 
 
 def register_bundled_models(

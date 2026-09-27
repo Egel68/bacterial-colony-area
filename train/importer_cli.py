@@ -101,6 +101,12 @@ def main():
         "--crop", action="store_true", help="Also produce cropped-to-dish pairs"
     )
     parser.add_argument(
+        "--split",
+        action="store_true",
+        help="Persist a deterministic stratified train/val/test split",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Split seed (default: 42)")
+    parser.add_argument(
         "--verify", action="store_true", help="Cross-check COCO vs YOLO/VOC counts"
     )
     args = parser.parse_args()
@@ -109,6 +115,8 @@ def main():
         data_root=args.data_root,
         output_dir=args.output,
         crop=args.crop,
+        split=args.split,
+        seed=args.seed,
     )
 
     if args.verify:

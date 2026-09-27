@@ -21,3 +21,7 @@ class TrainingConfig:
     device: str = "cuda"
     dashboard: bool = False
     dashboard_port: int = 8765
+    patch_training: bool = False
+    patches_per_image: int = 4
+    pretrained: bool = True
+    resume_checkpoint: Path | None = None

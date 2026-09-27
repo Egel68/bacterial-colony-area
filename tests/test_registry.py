@@ -61,12 +61,12 @@ class TestDescriptions:
     def test_includes_all_class_names(self):
         descs = get_algorithm_descriptions()
         names = {d[0] for d in descs}
-        assert names == {
+        assert {
             "ClassicDefault",
             "ClassicHighSensitivity",
             "ClassicSolidFill",
             "ClassicLowSensitivity",
-        }
+        } <= names
 
 
 class TestInstances:
