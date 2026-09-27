@@ -2,14 +2,14 @@
 
 ### Requirement: CI build matrix and quality gates
 
-Система SHALL запускать сборку Nuitka в CI на матрице `ubuntu-latest` и `windows-latest` при push в `develop`/`main`, при открытии или обновлении PR в `develop`, а также по ручному `workflow_dispatch`. Push в `feature/*` SHALL NOT самостоятельно запускать workflow: feature-ветки SHALL проверяться через события PR, включая новые commits (`synchronize`), чтобы один push в открытую PR-ветку не создавал дублирующую CI-матрицу. Перед сборкой SHALL выполняться проверка качества на зафиксированной версии `ruff` (не плавающий `latest`), и SHALL запускаться тесты с маркировкой `not slow and not gui`. Артефакты собранного бинарника SHALL загружаться для каждого runner-а. Шаги workflow SHALL использовать actions на рантайме `node24` (например, `actions/checkout@v7`, `actions/upload-artifact@v7`), Linux-runner SHALL включать `ccache` среди системных зависимостей, а перед checkout SHALL выполняться `git config --global init.defaultBranch main`, чтобы сборка SHALL завершаться без deprecation-warning Node.js 20, без `Nuitka-Scons: not using ccache` и без git-hint про `master`.
+Система SHALL запускать сборку Nuitka в CI на матрице `ubuntu-latest` и `windows-latest` при открытии или обновлении PR в `develop`, при каждом push в `main` или `master` (включая merge изменений из `develop`), а также по ручному `workflow_dispatch`. Push в `develop` или `feature/*` SHALL NOT самостоятельно запускать workflow: commits feature-ветки SHALL проверяться через события PR, включая новые commits (`synchronize`), чтобы один push в открытую PR-ветку не создавал дублирующую CI-матрицу. Перед сборкой SHALL выполняться проверка качества на зафиксированной версии `ruff` (не плавающий `latest`), и SHALL запускаться тесты с маркировкой `not slow and not gui`. Артефакты собранного бинарника SHALL загружаться для каждого runner-а. Шаги workflow SHALL использовать actions на рантайме `node24` (например, `actions/checkout@v7`, `actions/upload-artifact@v7`), Linux-runner SHALL включать `ccache` среди системных зависимостей, а перед checkout SHALL выполняться `git config --global init.defaultBranch main`, чтобы сборка SHALL завершаться без deprecation-warning Node.js 20, без `Nuitka-Scons: not using ccache` и без git-hint про `master`.
 
 #### Scenario: Feature PR pushes trigger exactly one matrix
 - **WHEN** commit отправляется в `feature/*` с открытым PR в `develop`
 - **THEN** для этого commit SHALL запускаться одна CI-матрица по событию PR и SHALL NOT запускаться вторая матрица по событию `push`
 
-#### Scenario: Release branch pushes trigger CI
-- **WHEN** commit отправляется в `develop` или `main`
+#### Scenario: Merge from develop into the primary branch triggers CI
+- **WHEN** изменения из `develop` попадают в `main` или `master`
 - **THEN** SHALL запускаться CI-матрица `ubuntu-latest` и `windows-latest`
 
 #### Scenario: Feature branch can be checked before opening a PR

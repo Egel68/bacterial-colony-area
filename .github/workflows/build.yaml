@@ -8,12 +8,12 @@ on:
       - opened
       - synchronize
       - reopened
-  # Изменения feature/* проверяются через pull_request (включая synchronize),
-  # чтобы каждый commit не запускал вторую такую же матрицу через push.
+  # Feature-ветки проверяются на каждый push через pull_request/synchronize.
+  # После merge develop сборка запускается на основной ветке репозитория.
   push:
     branches:
-      - develop
       - main
+      - master
   # Позволяет вручную запустить проверку для ветки до открытия PR.
   workflow_dispatch:
 
