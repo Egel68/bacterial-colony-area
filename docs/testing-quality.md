@@ -1,5 +1,10 @@
 # Тестирование и оценка качества алгоритмов распознавания колоний
 
+Метрики, реестр алгоритмов, планировщик прогонов, кэширование, telemetry и
+структура отчётов. Смежные документы: [architecture.md](architecture.md) —
+модули и их взаимодействие, [algorithms.md](algorithms.md) — справочник
+алгоритмов и контракт моделей, [user-guide.md](user-guide.md) — флаги CLI.
+
 ## 1. Общая схема
 
 ```
@@ -138,10 +143,14 @@ class BaseDetectionAlgorithm(ABC):
 2. CLAHE с усилением контраста (clip_limit = `2.0 × contrast`)
 3. Медианный blur (размер 5) — удаление шума
 4. Вычитание фона: GaussianBlur (51×51), `1.5×img − 0.5×bg`
-5. Адаптивная бинаризация: `threshold = mean + k × std`, где `k = 3.0 − sensitivity × 2.5`
-6. Морфология OPEN (3×3 эллипс) — удаление мелких шумов
-7. Опционально SOLID FILL: морфология CLOSE + заливка контуров
-8. Connected Components с фильтром по `min_colony_size`
+5. Адаптивная бинаризация: `threshold = mean + k × std`, где `k = 3.0 − sensitivity × 2.5`, с клампом в `[mean + 5, 254]`
+6. Морфология OPEN (3×3 эллипс, 1 итерация) — удаление мелких шумов
+7. Обычный режим: CLOSE (3×3 эллипс, 2 итерации) — склейка разрывов; SOLID FILL: CLOSE с ядром `fill_strength` + заливка контуров `FILLED`
+8. Connected Components (связность 8) с фильтром `area >= min_colony_size`
+
+Рабочая зона сужается до `radius · (100 − margin)/100` с практическим минимумом
+в 1% (`max(margin_percent, 1.0)`), а статистики порога считаются **только** по
+пикселям этой зоны.
 
 **Детекция чашки Петри** (`detect_petri_dish`):
 1. Поиск ярких объектов: GaussianBlur(9×9, σ=2), threshold 200, морфология CLOSE (30×30), `cv2.minEnclosingCircle` для самого большого контура
@@ -150,18 +159,46 @@ class BaseDetectionAlgorithm(ABC):
 
 ### 3.3. Нейросетевые алгоритмы (ONNX)
 
-`OnnxModelAlgorithm` адаптирует ONNX-модели к единому интерфейсу:
+Адаптеров два, оба CPU-only (`providers=["CPUExecutionProvider"]`), оба
+импортируют `onnxruntime` лениво — приложение работает и без него.
+
+#### `OnnxModelAlgorithm` — режим resize
+
+`testing/onnx_algorithm.py`:
 
 1. BGR → RGB (цветовой формат)
 2. Resize до 512×512 (INTER_LINEAR)
 3. Нормализация ImageNet (mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
 4. Инференс через `onnxruntime.InferenceSession`
-5. Resize обратно к исходному размеру (INTER_LINEAR)
-6. Бинаризация порогом 0.5 → маска uint8 (0/255)
+5. Resize выхода обратно к исходному размеру (INTER_LINEAR)
+6. Бинаризация порогом 0.5 (`raw > threshold`) → маска uint8 (0/255)
 
-Встроенные модели (из `models/*.onnx`) регистрируются автоматически при старте приложения как `NN:<имя_модели>`. Внешние модели подгружаются через GUI или флаг `--model`.
+Выход модели трактуется как вероятность — сигмоида **не** применяется.
 
-Готовая модель `models/colony_seg.onnx`: IoU 0.72, Dice 0.83 на валидации датасета 22022540.
+#### `TiledOnnxModelAlgorithm` — полное разрешение
+
+`testing/tiled_onnx_algorithm.py`: кадр режется на тайлы 512×512 с шагом
+`stride=384` (перекрытие 128 px). Каждый тайл нормализуется и прогоняется
+отдельно, вероятности **усредняются** по перекрытию, затем применяется порог
+(`>= threshold`). Сигмоида применяется, если `output_is_logits=True` (по
+умолчанию). Метод `detect_with_progress(image, is_cropped, progress_callback)`
+сообщает число обработанных тайлов — его использует окно анализа для полосы
+прогресса. Параметр `is_cropped` игнорируется: тайлы покрывают весь кадр.
+
+Выбор адаптера делает `scan_bundled_models()` по имени файла в `models/`:
+`colony_mobilenet_v3_small` → тайловый, `colony_seg` и всё остальное → resize.
+Флаг `--model` и кнопка «Загрузить модель» такого выбора **не** делают —
+всегда создаётся `OnnxModelAlgorithm`.
+
+#### Регистрация моделей
+
+Модели из `models/*.onnx` регистрируются как `NN:<stem>`. Вызов
+`register_bundled_models()` есть в `main.py` и в `AnalysisWindow`, но **нет**
+в `testing/__main__.py` — поэтому в CLI модели `NN:*` появляются только через
+`--model` (см. [architecture.md § 3](architecture.md#регистрация-встроенных-моделей)).
+
+Готовая модель `models/colony_seg.onnx`: IoU 0.72, Dice 0.83 на валидации
+датасета 22022540. Полный справочник — [algorithms.md](algorithms.md).
 
 ---
 
@@ -234,24 +271,135 @@ uv run test-algorithms \
 
 ```bash
 # Прогон 4 классических алгоритмов → JSON для сравнения с нейросетью
-uv run baseline --mode baseline \
+uv run baseline \
     --data-root datasets/22022540_imported \
     --output baseline.json
 
 # Без cropped-вариантов
-uv run baseline --mode baseline \
+uv run baseline \
     --data-root test_images \
     --output baseline.json \
     --no-cropped
 ```
 
+Режим `baseline` совпадает с `test-algorithms --mode baseline`; отдельная
+консольная команда существует, чтобы не набирать `--mode` каждый раз.
+
 ### 5.3. GUI
 
 В приложении: главное окно → «Тестирование алгоритмов» → выбор датасета, чекбоксы алгоритмов, загрузка моделей, запуск, экспорт HTML-отчёта.
 
+Окно использует `TestDataset` (папки `source/` + `masks/`), а не
+`BaselineDataset`, поэтому `dataset.json` и структуру `importer` оно не читает.
+Модели `NN:*` в списке по умолчанию отсутствуют — их нужно загрузить кнопкой.
+
+### 5.4. CLI (режим evaluate — каталог прогона)
+
+```bash
+uv run evaluate --data-root test_images
+
+# Импортировать сырой COCO-датасет и тут же измерить
+uv run evaluate --data-root ./out --import-root datasets/22022540
+
+# Конфиг-файл + телеметрия
+uv run evaluate --config eval.yaml --telemetry --performance-output ./perf.json
+```
+
+`evaluate` создаёт отдельный каталог прогона и складывает в него всё, что
+нужно для воспроизводимости:
+
+```
+evaluations/2026-09-15_19-44-10/
+├── report.json      полная выгрузка метрик
+├── report.html      самодостаточный отчёт с Chart.js
+├── run_info.json    run_id, timestamp, путь и размер датасета, алгоритмы, git
+├── config.yaml      снимок конфигурации (config.json, если нет PyYAML)
+└── performance.json (+ .jsonl)   телеметрия, если включена
+```
+
+Приоритет конфигурации: `DEFAULT_CONFIG` ← файл `--config` ← CLI. При этом
+значения, которые argparse вернул как дефолты (а не `None`), **перетирают**
+файл конфигурации. Чтобы параметр из YAML действительно применялся, не
+полагайтесь на дефолт парсера.
+
+`--sample-limit` отключает чтение агрегатного кэша, чтобы прогон на
+подмножестве не испортил кэш полного датасета.
+
 ---
 
-## 6. Структура baseline отчёта (JSON)
+## 6. Производительность: батчи, потоки, кэш, телеметрия
+
+Все режимы оценки, включая GUI, выполняются одним и тем же
+`scheduler.execute_pipeline`.
+
+### Батчи и память
+
+`iter_batches(dataset, batch_size=8, memory_budget=None, ...)` накапливает
+сэмплы, пока не выполнится **любое** из условий:
+
+- набралось `batch_size` сэмплов;
+- сумма `image.nbytes + mask.nbytes` превысила `memory_budget`.
+
+Превышение бюджета **одним** сэмплом прогон не останавливает — оно
+фиксируется событием `memory_budget_exceeded` в телеметрии. Нечитаемая пара
+(битый файл) не роняет прогон: ошибка попадает в лог и телеметрию, сэмпл
+пропускается.
+
+### Число потоков
+
+`_effective_workers(requested, task_count, memory_budget, batch_bytes)`:
+
+- при `workers=None` берётся число **физических** ядер (`psutil.cpu_count(logical=False)`);
+- при заданном `--memory-budget` число ядер дополнительно ограничивается
+  `available_memory // memory_budget`;
+- итог ограничен числом задач в батче и никогда не меньше 1;
+- `--workers 0` или отрицательное значение → `ValueError`.
+
+Адаптивное уменьшение: если `batch_bytes > memory_budget` либо сумма двух
+последних `queue_wait` вдвое превышает сумму двух последних `detect`, число
+потоков уменьшается вдвое (`workers_reduced` в телеметрии).
+
+**Важно:** параллельно работают только алгоритмы, зарегистрированные как
+**классы** (то есть классика) — каждому потоку достаётся свой экземпляр.
+NN-модели зарегистрированы как экземпляры и вызываются под общим
+`threading.Lock` строго последовательно, поскольку одна ONNX-сессия не должна
+работать из нескольких потоков одновременно.
+
+### Два независимых кэша
+
+| Механизм | Что кеширует | Где лежит | Ключ |
+|---|---|---|---|
+| Сигнатура датасета | Готовые метрики по алгоритмам | `{data_root}/.cache/{sha256}.json` | Хэш от списка `путь:размер` файлов в `source/`, `masks/`, `cropped/`, `cropped_masks/` + `dataset.json` |
+| `PredictionCache` | Маски предсказаний (`--cache`) | `{data_root}/.cache/preds/{algo}/{sha256}.png` | `algo_name` + `params` + байты изображения |
+
+Ограничения, о которых стоит помнить:
+
+- Сигнатура учитывает **только размеры** файлов: правка содержимого при том
+  же размере кэш не инвалидирует.
+- `--clear-cache` удаляет только файл с текущей сигнатурой, а не каталог
+  `.cache/`; кэш предсказаний он не трогает.
+- `PredictionCache.put*` не перезаписывает уже существующий файл, а `get*`
+  возвращает `None`, если PNG не читается, — «битый» кэш не валит прогон.
+- В ключ предсказания входит `is_cropped`, поэтому исходник и обрезок одного
+  объекта не путаются.
+
+### Телеметрия
+
+`--telemetry` включает `TelemetryCollector`, который пишет два файла:
+
+| Файл | Содержимое |
+|---|---|
+| `performance.json` (путь из `--performance-output`) | Итоговая сводка: стадии с перцентилями, счётчики, ошибки, число сериализованных вызовов |
+| `performance.jsonl` | Поток событий: `batch_started`, `batch_loaded`, `workers_reduced`, `memory_budget_exceeded`, снапшоты очереди с интервалом `--telemetry-interval` |
+
+Отслеживаемые стадии: `load`, `queue_wait`, `cache`, `detect`, `metrics`,
+`report`. Это основной инструмент, чтобы понять, куда уходит время: если
+`queue_wait` заметно больше `detect`, потоков слишком много или они
+конкурируют за память.
+
+---
+
+## 7. Структура baseline отчёта (JSON)
 
 ```json
 {
@@ -278,7 +426,7 @@ uv run baseline --mode baseline \
 
 ---
 
-## 7. Baseline на датасете 22022540
+## 8. Baseline на датасете 22022540
 
 Датасет 22022540: 369 изображений, 56 865 аннотированных колоний, 24 вида бактерий из коллекции НИИ антимикробной химиотерапии (Смоленск). Изображения импортированы через `CocoBboxImporter`, боксы растризованы во вписанные эллипсы бинарной маски.
 
@@ -296,27 +444,54 @@ uv run baseline --mode baseline \
 
 ---
 
-## 8. Архитектура кода
+## 9. Архитектура кода
+
+Полный разбор слоёв и сигнатур — в [architecture.md § 6](architecture.md#6-пакет-testing).
+Здесь только карта модулей, участвующих в оценке.
 
 ```
 testing/
-├── __init__.py
-├── __main__.py        # CLI entry point (test-algorithms, baseline)
-├── interface.py       # BaseDetectionAlgorithm (ABC)
-├── registry.py        # @register_algorithm + register_algorithm_instance
+├── __init__.py            # импорт classic_algorithms: регистрация 4 классических
+├── __main__.py            # CLI: test-algorithms (report/baseline/evaluate), baseline, evaluate
+├── interface.py           # BaseDetectionAlgorithm (ABC)
+├── registry.py            # @register_algorithm + register_algorithm_instance
 ├── classic_algorithms.py  # 4 OpenCV-алгоритма с фиксированными параметрами
-├── onnx_algorithm.py      # ONNX adapter + scanner bundled models
-├── dataset.py         # TestDataset (legacy structure loader)
-├── baseline.py        # BaselineDataset + run_baseline + export_json
-├── metrics.py         # compute_segmentation_metrics (6 метрик)
-├── runner.py          # run_algorithm, run_all, compare_algorithms, _mean_metrics
-└── dashboard.py       # generate_report (HTML with Chart.js)
+├── onnx_algorithm.py      # OnnxModelAlgorithm, scan_bundled_models, register_bundled_models
+├── tiled_onnx_algorithm.py# TiledOnnxModelAlgorithm, tile_positions — полное разрешение
+├── metrics.py             # compute_segmentation_metrics (6 метрик + tp/fp/fn/tn)
+├── statistics.py          # описательная статистика, Wilcoxon, доли побед, выбросы
+├── scheduler.py           # execute_pipeline: батчи + ThreadPoolExecutor + кэш
+├── cache.py               # сигнатура датасета, PredictionCache (маски в PNG)
+├── telemetry.py           # TelemetryCollector: performance.json + .jsonl
+├── dataset.py             # TestDataset: пары source/ + masks/ (+ cropped)
+├── baseline.py            # BaselineDataset (manifest/legacy/importer) + run_baseline + export_json
+├── runner.py              # run_all, агрегация, Wilcoxon-таблица, выбросы, доли побед
+├── evaluator.py           # режим evaluate: load_config, create_run_dir, отчёты run-dir
+└── dashboard.py           # generate_report: HTML с Chart.js
 ```
 
 ```
-analysis/
-├── colony_detector.py  # ColonyDetector: detect_petri_dish + detect_colonies
-├── image_processor.py   # CLAHE, green channel, median blur
-├── params.py            # AnalysisParams (dataclass с валидацией)
-└── geometry.py          # PetriInfo
+analysis/                    # слой предметной области, используемый классикой
+├── colony_detector.py       # ColonyDetector: detect_petri_dish + detect_colonies
+├── image_processor.py       # CLAHE, зелёный канал, median blur
+├── params.py                # AnalysisParams (dataclass с валидацией диапазонов)
+├── geometry.py              # PetriInfo (frozen dataclass)
+└── results.py               # AnalysisResult (frozen dataclass)
 ```
+
+Поток исполнения одинаков для всех режимов и для GUI:
+
+```
+TestDataset | BaselineDataset
+  → scheduler._sample_refs → iter_batches (лимит по числу и байтам)
+  → ThreadPoolExecutor: задача = (сэмпл × алгоритм)
+      → PredictionCache.get_array → [_AlgorithmRuntime.detect] → put_array
+      → compute_segmentation_metrics
+  → агрегация (compute_summary / wilcoxon / outliers / winners)
+  → dashboard.generate_report  |  export_json + evaluator._generate_eval_html
+```
+
+Подробности: [scheduler](architecture.md#64-планировщик-testingschedulerpy),
+[кэш](architecture.md#65-кэш-testingcachepy),
+[telemetry](architecture.md#68-telemetry-testingtelemetrypy),
+[отчёты](architecture.md#69-отчёты).

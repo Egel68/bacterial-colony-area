@@ -65,6 +65,7 @@ class BaseSegmenter(ABC, nn.Module):
                 output_names=["output"],
                 dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
                 opset_version=18,
+                external_data=False,
             )
 
     @staticmethod

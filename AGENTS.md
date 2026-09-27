@@ -9,7 +9,7 @@ Python 3.13+ / PyQt6 / OpenCV / NumPy desktop app for analysing bacterial coloni
 ### Из исходников (разработка)
 
 ```bash
-# Установка runtime-окружения (~600 МБ)
+# Runtime-окружение для приложения и ONNX Runtime CPU (без PyTorch)
 uv sync
 
 # Запуск приложения
@@ -28,6 +28,12 @@ uv run bacteria-analyzer
 ### 2.1. Анализ колоний (главный режим)
 
 **Назначение:** автоматический подсчёт колоний бактерий на изображении чашки Петри.
+
+В окне анализа можно выбрать классический режим или зарегистрированный алгоритм.
+Новая MobileNet ONNX-модель работает на CPU по полноразмерным перекрывающимся
+тайлам; во время её работы окно показывает прогресс.
+Обучение MobileNet выполняется на CUDA, если доступна GPU; ONNX-инференс приложения
+остаётся CPU-only через ONNX Runtime `CPUExecutionProvider`.
 
 **Как использовать:**
 
@@ -378,7 +384,7 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
 
 ```bash
 bash scripts/build_nuitka.sh
-# Результат: ./BacteriaAnalyzer (~85–125 МБ, standalone)
+# Результат: ./BacteriaAnalyzer (размер зависит от runtime-зависимостей и ONNX-моделей)
 ```
 
 ### Структура бинарника
@@ -387,11 +393,12 @@ bash scripts/build_nuitka.sh
 - Исключены: `train`, `.venv`, `.venv-dev`, `.venv-full`, `.venv-build`, `test_images/`
 - Включён плагин PyQt6
 - Размер бинарника зависит от чистоты окружения сборки: сборка выполняется из изолированного `.venv-build` без dev/ML-пакетов
+- Проверенная Linux onefile-сборка 2026-09-27 с ONNX Runtime 1.27.0 и двумя bundled-моделями: 170,221,056 bytes (162.3 MiB; контрольный диапазон этой конфигурации 155–175 MiB). Standalone executable: 61,191,088 bytes; каталог standalone: около 499 MiB.
 
 ### Минимальное окружение сборки
 
 Сборка всегда идёт из изолированного build-окружения **`.venv-build`** — как локально, так и в CI. Оно создаётся ad-hoc и содержит **только**:
-- runtime-зависимости: `PyQt6`, `opencv-python-headless`, `numpy`;
+- runtime-зависимости: `PyQt6`, `opencv-python-headless`, `numpy`, `onnxruntime` CPU;
 - инструменты сборки: `nuitka`, `zstandard`.
 
 `.venv` / `.venv-dev` / `.venv-full` при сборке не изменяются и не загрязняются. `.venv-build` исключён из `.gitignore` и из флагов Nuitka (`scripts/nuitka_flags.py`). Запуск Nuitka использует `--no-sync`, чтобы `uv run` не удалил вручную установленные `nuitka`/`zstandard`.
@@ -412,10 +419,10 @@ bash scripts/build_nuitka.sh
 
 | Окружение | Команда | Размер | Назначение |
 |---|---|---|---|
-| `.venv` (runtime) | `uv sync` | ~475 МБ | Запуск приложения. Содержит только PyQt6, opencv-python-headless, numpy |
-| `.venv-dev` (dev) | `UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev` | ~530 МБ | Разработка и тестирование без ML: pytest + nuitka + zstandard |
-| `.venv-full` (full) | `UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full` | ~5 ГБ | Полная разработка, обучение U-Net, аугментация (включает torch, onnxruntime) |
-| `.venv-build` (build, ad-hoc) | `uv sync` без extras + `uv pip install --python .venv-build nuitka zstandard` | ~0,5 ГБ | Сборка бинарника Nuitka. Создаётся автоматически `scripts/build_nuitka.sh` и CI; вручную не требуется |
+| `.venv` (runtime) | `uv sync` | зависит от платформы | Запуск приложения и ONNX Runtime CPU; без PyTorch |
+| `.venv-dev` (dev) | `UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev` | зависит от платформы | Тесты и инструменты сборки; включает ONNX Runtime CPU, без PyTorch |
+| `.venv-full` (full) | `UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full` | зависит от платформы | Обучение MobileNet/U-Net; включает torch/torchvision и ONNX Runtime |
+| `.venv-build` (build, ad-hoc) | `uv sync` без extras + `uv pip install --python .venv-build nuitka zstandard` | зависит от платформы | Nuitka-сборка с ONNX Runtime CPU, без PyTorch; создаётся скриптом/CI |
 
 **Важно:** после обновления ветки с новой структурой окружений старые `.venv`/`.venv-dev`/`.venv-full` нужно удалить и пересоздать заново. Если в `.venv` вручную были доустановлены пакеты (nuitka, pytest и т.д.), они будут удалены при `uv sync`. Сборка бинарника изолирована в `.venv-build` и не загрязняет `.venv`.
 

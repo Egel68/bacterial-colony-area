@@ -30,4 +30,6 @@ if __name__ == "__main__":
 
     cmd = [sys.executable, "-m", "nuitka", *flags, *sys.argv[1:]]
     print(f"Running: {' '.join(cmd)}")
-    subprocess.check_call(cmd)
+    work_dir = Path(os.environ.get("NUITKA_WORK_DIR", ROOT)).resolve()
+    work_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.check_call(cmd, cwd=work_dir)

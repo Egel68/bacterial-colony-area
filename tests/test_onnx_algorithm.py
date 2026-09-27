@@ -1,9 +1,11 @@
+import sys
 from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
 import pytest
 
+import testing.onnx_algorithm as onnx_algorithm
 from testing.onnx_algorithm import OnnxModelAlgorithm
 
 
@@ -23,11 +25,15 @@ class _FakeSession:
         return [np.ones((batch, 1, h, w), dtype=np.float32) * self.output_value]
 
 
-def _fake_module(output_value=0.9):
+def _fake_module(output_value=0.9, providers_seen=None):
     """Возвращает фейковый модуль onnxruntime."""
-    return SimpleNamespace(
-        InferenceSession=lambda path: _FakeSession(path, output_value)
-    )
+
+    def create_session(path, providers=None):
+        if providers_seen is not None:
+            providers_seen.append(providers)
+        return _FakeSession(path, output_value)
+
+    return SimpleNamespace(InferenceSession=create_session)
 
 
 @pytest.fixture
@@ -79,3 +85,45 @@ class TestMissingOnnxRuntime:
             algo = OnnxModelAlgorithm(model_path="model.onnx")
             with pytest.raises(RuntimeError, match="onnxruntime"):
                 algo.detect(bgr_image)
+
+
+def test_session_explicitly_uses_cpu_provider(bgr_image, monkeypatch):
+    providers = []
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "onnxruntime",
+        _fake_module(0.9, providers_seen=providers),
+    )
+
+    OnnxModelAlgorithm(model_path="model.onnx").detect(bgr_image)
+
+    assert providers == [["CPUExecutionProvider"]]
+
+
+def test_default_models_dir_uses_nuitka_onefile_payload(tmp_path, monkeypatch):
+    extraction_dir = tmp_path / "onefile-payload"
+    (extraction_dir / "models").mkdir(parents=True)
+    binary_dir = tmp_path / "installed-app"
+    binary_dir.mkdir()
+    monkeypatch.setattr(sys, "executable", str(extraction_dir / "python"))
+    monkeypatch.setattr(
+        onnx_algorithm,
+        "__compiled__",
+        SimpleNamespace(containing_dir=str(binary_dir), onefile=True),
+        raising=False,
+    )
+
+    assert onnx_algorithm._default_models_dir() == extraction_dir / "models"
+
+
+def test_default_models_dir_uses_nuitka_standalone_dir(tmp_path, monkeypatch):
+    binary_dir = tmp_path / "standalone"
+    (binary_dir / "models").mkdir(parents=True)
+    monkeypatch.setattr(
+        onnx_algorithm,
+        "__compiled__",
+        SimpleNamespace(containing_dir=str(binary_dir), onefile=False),
+        raising=False,
+    )
+
+    assert onnx_algorithm._default_models_dir() == binary_dir / "models"

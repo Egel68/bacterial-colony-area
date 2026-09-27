@@ -5,7 +5,7 @@
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 from analysis.params import AnalysisParams
@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QScrollArea,
     QSizePolicy,
     QSlider,
@@ -34,6 +35,35 @@ from PyQt6.QtWidgets import (
 
 from analysis.geometry import PetriInfo
 from .controllers.analysis_controller import AnalysisController
+
+
+class _AlgorithmWorker(QObject):
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, controller, image, petri_mask, petri_info, algorithm, margin):
+        super().__init__()
+        self.controller = controller
+        self.image = image
+        self.petri_mask = petri_mask
+        self.petri_info = petri_info
+        self.algorithm = algorithm
+        self.margin = margin
+
+    def run(self):
+        try:
+            result = self.controller.calculate_algorithm_result(
+                self.image,
+                self.petri_mask,
+                self.algorithm,
+                petri_info=self.petri_info,
+                margin_percent=self.margin,
+                progress_callback=self.progress.emit,
+            )
+            self.finished.emit(result)
+        except Exception as error:
+            self.failed.emit(str(error))
 
 
 class ImageLabel(QLabel):
@@ -74,6 +104,9 @@ class AnalysisWindow(QMainWindow):
         self.petri_mask = None
         self.petri_info: PetriInfo | None = None
         self.analysis_results = None
+        self._analysis_thread = None
+        self._analysis_worker = None
+        self._analysis_busy = False
 
         self._updating_ui = False
 
@@ -114,6 +147,7 @@ class AnalysisWindow(QMainWindow):
         self.controls_layout.addStretch()
         scroll.setWidget(controls_widget)
         main_layout.addWidget(scroll)
+        self.statusBar().showMessage("Готов к работе")
 
     def _create_image_panel(self, layout: QHBoxLayout):
         image_frame = QFrame()
@@ -136,6 +170,10 @@ class AnalysisWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #a6adc8;")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vl.addWidget(self.status_label)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.hide()
+        vl.addWidget(self.progress_bar)
 
         layout.addWidget(image_frame, stretch=2)
 
@@ -164,6 +202,12 @@ class AnalysisWindow(QMainWindow):
         self.show_area_overlay.setChecked(True)
         self.show_area_overlay.stateChanged.connect(self._update_display)
         vl.addWidget(self.show_area_overlay)
+
+        self.algorithm_combo = QComboBox()
+        self._load_analysis_algorithms()
+        vl.addWidget(QLabel("Алгоритм распознавания:"))
+        vl.addWidget(self.algorithm_combo)
+        self.algorithm_combo.currentIndexChanged.connect(self._on_algorithm_changed)
 
         layout.addWidget(group)
 
@@ -277,6 +321,7 @@ class AnalysisWindow(QMainWindow):
             "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; margin-top: 10px;"
         )
         btn_apply.clicked.connect(self._run_colony_analysis_only)
+        self.btn_apply = btn_apply
         vl.addWidget(btn_apply)
 
         layout.addWidget(group)
@@ -357,7 +402,19 @@ class AnalysisWindow(QMainWindow):
         if not self.petri_info:
             return
 
+        if self._analysis_busy:
+            return
+
+        algorithm = self._selected_algorithm()
+        if algorithm is not None and algorithm.name.startswith("NN:"):
+            self._run_algorithm_async(algorithm)
+            return
+        if algorithm is not None:
+            self._run_algorithm_synchronously(algorithm)
+            return
+
         self.status_label.setText("Анализ колоний...")
+        self.statusBar().showMessage("Анализ колоний...")
 
         params = AnalysisParams(
             sensitivity=self.slider_sens.value() / 100.0,
@@ -384,8 +441,129 @@ class AnalysisWindow(QMainWindow):
         )
         self.text_results.setText(text)
         self.status_label.setText(f"Готово. Найдено: {res.colony_count}")
+        self.statusBar().showMessage(f"Готово. Найдено: {res.colony_count}")
 
         self._update_display()
+
+    def _load_analysis_algorithms(self):
+        from testing.onnx_algorithm import register_bundled_models
+        from testing.registry import list_algorithms
+
+        register_bundled_models()
+        self.algorithm_combo.addItem("Классический (параметры ниже)", "__classic__")
+        for name in list_algorithms():
+            self.algorithm_combo.addItem(name, name)
+
+    def _selected_algorithm(self):
+        name = self.algorithm_combo.currentData()
+        if not name or name == "__classic__":
+            return None
+        from testing.registry import get_algorithm
+
+        return get_algorithm(name)
+
+    def _on_algorithm_changed(self, _index):
+        name = self.algorithm_combo.currentData()
+        uses_classic_controls = name == "__classic__"
+        for widget in (
+            self.slider_sens,
+            self.slider_contrast,
+            self.spin_min_size,
+            self.chk_solid_fill,
+            self.spin_fill_strength,
+        ):
+            widget.setEnabled(uses_classic_controls)
+
+    def _run_algorithm_async(self, algorithm):
+        self._analysis_busy = True
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.show()
+        self.statusBar().showMessage(f"Запуск {algorithm.name}…")
+        self.status_label.setText(f"Запуск {algorithm.name}…")
+        self.btn_apply.setEnabled(False)
+        self.algorithm_combo.setEnabled(False)
+        for widget in (self.spin_x, self.spin_y, self.spin_radius, self.spin_margin):
+            widget.setEnabled(False)
+
+        self._analysis_thread = QThread(self)
+        self._analysis_worker = _AlgorithmWorker(
+            self.controller,
+            self.original_image.copy(),
+            self.petri_mask.copy(),
+            self.petri_info,
+            algorithm,
+            self.spin_margin.value(),
+        )
+        self._analysis_worker.moveToThread(self._analysis_thread)
+        self._analysis_thread.started.connect(self._analysis_worker.run)
+        self._analysis_worker.progress.connect(self._on_algorithm_progress)
+        self._analysis_worker.finished.connect(self._on_algorithm_finished)
+        self._analysis_worker.failed.connect(self._on_algorithm_failed)
+        self._analysis_worker.finished.connect(self._analysis_thread.quit)
+        self._analysis_worker.failed.connect(self._analysis_thread.quit)
+        self._analysis_thread.finished.connect(self._cleanup_algorithm_worker)
+        self._analysis_thread.start()
+
+    def _on_algorithm_progress(self, completed, total):
+        self.progress_bar.setRange(0, max(1, total))
+        self.progress_bar.setValue(completed)
+        message = f"Обработано тайлов {completed}/{total}"
+        self.statusBar().showMessage(message)
+        self.status_label.setText(message)
+
+    def _on_algorithm_finished(self, result_and_mask):
+        result, mask = result_and_mask
+        self.controller.set_algorithm_mask(mask)
+        self.analysis_results = result
+        self.text_results.setText(
+            f"Количество колоний: {result.colony_count}\n"
+            f"Покрытие (рабочей зоны): {result.coverage_percent:.2f}%\n"
+            f"Площадь колоний: {result.colony_area_px} px"
+        )
+        self.statusBar().showMessage(f"Готово. Найдено: {result.colony_count}")
+        self.status_label.setText(f"Готово. Найдено: {result.colony_count}")
+        self._update_display()
+
+    def _on_algorithm_failed(self, message):
+        self.statusBar().showMessage("Ошибка нейросетевого анализа")
+        self.status_label.setText("Ошибка анализа")
+        QMessageBox.critical(self, "Ошибка модели", message)
+
+    def _cleanup_algorithm_worker(self):
+        self._analysis_busy = False
+        self.btn_apply.setEnabled(True)
+        self.algorithm_combo.setEnabled(True)
+        for widget in (self.spin_x, self.spin_y, self.spin_radius, self.spin_margin):
+            widget.setEnabled(True)
+        self.progress_bar.hide()
+        if self._analysis_worker is not None:
+            self._analysis_worker.deleteLater()
+        self._analysis_worker = None
+        self._analysis_thread = None
+
+    def _run_algorithm_synchronously(self, algorithm):
+        self.statusBar().showMessage(f"Анализ: {algorithm.name}…")
+        try:
+            result_and_mask = self.controller.analyze_with_algorithm(
+                self.original_image,
+                self.petri_mask,
+                algorithm,
+                petri_info=self.petri_info,
+                margin_percent=self.spin_margin.value(),
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "Ошибка алгоритма", str(error))
+            return
+        self._on_algorithm_finished((result_and_mask, self.controller.colony_mask))
+
+    def closeEvent(self, event):
+        if self._analysis_thread is not None and self._analysis_thread.isRunning():
+            self.statusBar().showMessage(
+                "Дождитесь завершения анализа перед закрытием окна"
+            )
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _update_display(self):
         if self.original_image is None:

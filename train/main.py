@@ -1,22 +1,23 @@
 import argparse
+import math
 import json
 import logging
 import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Sequence
 
 from .config import TrainingConfig
-from .dataset import make_datasets
-from .models import list_models
-from .reporter import generate_report
-from .train import run_training
 from utils.logging import setup_logging
 
 log = logging.getLogger(__name__)
 
 
 def _train(args):
+    from .reporter import generate_report
+    from .train import run_training
+
     cfg = TrainingConfig(
         model_name=args.model,
         epochs=args.epochs,
@@ -124,11 +125,15 @@ def _train_compare(args):
 
 
 def _list_models(_):
+    from .models import list_models
+
     for name in list_models():
         log.info("  %s", name)
 
 
 def _dataset_info(_):
+    from .dataset import make_datasets
+
     cfg = TrainingConfig()
     train_ds, val_ds = make_datasets(
         cfg.data_root, cfg.img_size, cfg.val_split, cfg.seed, cfg.augment
@@ -137,7 +142,37 @@ def _dataset_info(_):
     log.info("Val:   %d samples", len(val_ds))
 
 
-def main():
+def _train_colony(args, parser):
+    ratios = (args.train_ratio, args.val_ratio, args.test_ratio)
+    if any(ratio <= 0 for ratio in ratios) or not math.isclose(sum(ratios), 1.0):
+        parser.error("Train/validation/test ratios must be positive and sum to 1")
+    if args.epochs <= 0 or args.batch_size <= 0 or args.patches_per_image <= 0:
+        parser.error("epochs, batch-size and patches-per-image must be positive")
+    if args.img_size != 512:
+        parser.error(
+            "Native-resolution patch training currently requires --img-size 512"
+        )
+
+    from .training_pipeline import run_colony_training
+
+    run_colony_training(
+        data_root=Path(args.data_root),
+        output_root=Path(args.output),
+        seed=args.seed,
+        ratios=ratios,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        patches_per_image=args.patches_per_image,
+        img_size=args.img_size,
+        pretrained=not args.no_pretrained,
+        model_promotion_path=(Path(args.promote_model) if args.promote_model else None),
+        allow_overwrite=args.allow_overwrite,
+        cpu_benchmark=args.cpu_benchmark,
+        resume_run=Path(args.resume_run) if args.resume_run else None,
+    )
+
+
+def main(argv: Sequence[str] | None = None):
     setup_logging(logging.INFO)
     parser = argparse.ArgumentParser(description="Colony segmentation training")
     sub = parser.add_subparsers(dest="command")
@@ -182,7 +217,38 @@ def main():
     sub.add_parser("list-models", help="List available models")
     sub.add_parser("dataset-info", help="Show dataset info")
 
-    args = parser.parse_args()
+    colony_parser = sub.add_parser(
+        "train-colony", help="Prepare, train and evaluate the compact COCO segmenter"
+    )
+    colony_parser.add_argument(
+        "--data-root", required=True, help="COCO source directory"
+    )
+    colony_parser.add_argument(
+        "--output", required=True, help="Output root for dataset and run"
+    )
+    colony_parser.add_argument("--seed", type=int, default=42)
+    colony_parser.add_argument("--train-ratio", type=float, default=0.70)
+    colony_parser.add_argument("--val-ratio", type=float, default=0.15)
+    colony_parser.add_argument("--test-ratio", type=float, default=0.15)
+    colony_parser.add_argument("--epochs", type=int, default=100)
+    colony_parser.add_argument("--batch-size", type=int, default=8)
+    colony_parser.add_argument("--patches-per-image", type=int, default=4)
+    colony_parser.add_argument("--img-size", type=int, default=512)
+    colony_parser.add_argument("--no-pretrained", action="store_true")
+    colony_parser.add_argument(
+        "--promote-model", help="Optional explicit ONNX promotion path"
+    )
+    colony_parser.add_argument("--allow-overwrite", action="store_true")
+    colony_parser.add_argument("--cpu-benchmark", action="store_true")
+    colony_parser.add_argument(
+        "--resume-run",
+        help=(
+            "Continue an existing run from its resume state; older runs warm-start "
+            "from last.pt or best.pt"
+        ),
+    )
+
+    args = parser.parse_args(argv)
     if args.command == "train":
         _train(args)
     elif args.command == "train-compare":
@@ -191,6 +257,8 @@ def main():
         _list_models(args)
     elif args.command == "dataset-info":
         _dataset_info(args)
+    elif args.command == "train-colony":
+        _train_colony(args, parser)
     else:
         parser.print_help()
 

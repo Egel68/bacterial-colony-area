@@ -83,6 +83,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "opencv-python-headless" },
     { name = "psutil" },
     { name = "pyqt6" },
@@ -103,7 +104,6 @@ full = [
     { name = "fastapi" },
     { name = "hypothesis" },
     { name = "nuitka" },
-    { name = "onnxruntime" },
     { name = "onnxscript" },
     { name = "plotly" },
     { name = "pytest" },
@@ -136,7 +136,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.100.0" },
     { name = "nuitka", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "onnxruntime", marker = "extra == 'full'", specifier = ">=1.18.0" },
+    { name = "onnxruntime", specifier = ">=1.18.0" },
     { name = "onnxscript", marker = "extra == 'full'" },
     { name = "opencv-python-headless", specifier = ">=4.8.0" },
     { name = "plotly", marker = "extra == 'full'", specifier = ">=5.18.0" },

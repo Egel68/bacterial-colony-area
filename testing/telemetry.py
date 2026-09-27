@@ -68,24 +68,29 @@ class TelemetryCollector:
                 "read_bytes": None,
                 "write_bytes": None,
             },
-            "capabilities": {"psutil": False},
+            "capabilities": {"psutil": False, "process_io_counters": False},
         }
         try:
             import psutil
 
             process = psutil.Process(os.getpid())
-            io = process.io_counters()
+            try:
+                io = process.io_counters()
+            except (OSError, AttributeError):
+                io = None
             resources["cpu"] = {
                 "process_percent": process.cpu_percent(None),
                 "system_percent": psutil.cpu_percent(None),
             }
             resources["memory"]["rss"] = process.memory_info().rss
-            resources["io"] = {
-                "read_count": io.read_count,
-                "write_count": io.write_count,
-                "read_bytes": io.read_bytes,
-                "write_bytes": io.write_bytes,
-            }
+            if io is not None:
+                resources["io"] = {
+                    "read_count": io.read_count,
+                    "write_count": io.write_count,
+                    "read_bytes": io.read_bytes,
+                    "write_bytes": io.write_bytes,
+                }
+                resources["capabilities"]["process_io_counters"] = True
             resources["capabilities"]["psutil"] = True
         except (ImportError, OSError, AttributeError):
             # psutil is optional at import time so the CLI remains usable.

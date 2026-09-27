@@ -8,6 +8,7 @@ dependencies = [
     "opencv-python-headless>=4.8.0",
     "numpy>=1.24.0",
     "psutil>=5.9.0",
+    "onnxruntime>=1.18.0",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +35,6 @@ full = [
     "websockets>=12.0",
     "rich>=13.7.0",
     "albumentations>=1.3.0",
-    "onnxruntime>=1.18.0",
     "tqdm>=4.65.0",
     "bacterial-colony-analyzer[dev]",
 ]
@@ -68,3 +68,4 @@ test-algorithms = "testing.__main__:main"
 import-22022540 = "train.importer_cli:main"
 baseline = "testing.__main__:main_baseline"
 evaluate = "testing.__main__:main_evaluate"
+train-colony = "train.colony_cli:main"
