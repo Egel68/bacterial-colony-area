@@ -41,7 +41,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Bacteria Colony Analyzer")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("0.2.0")
 
     # Устанавливаем шрифт приложения
     font = QFont("Segoe UI", 10)
