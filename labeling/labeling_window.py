@@ -4,11 +4,16 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 
 from analysis.geometry import PetriInfo
+from labeling.session_manager import ensure_session_structure
 from ui.controllers.labeling_controller import LabelingController
+from ui.responsive import (
+    install_application_responsive_sizing,
+    set_responsive_stylesheet,
+)
 from utils.image_loader import load_image
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -37,9 +42,10 @@ class PaintLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumSize(400, 400)
+        self.setMinimumSize(0, 0)
         self.setStyleSheet("background-color: #11111b; border-radius: 8px;")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._base_zoom_minimum = QSize(0, 0)
 
         self._image = None
         self._mask = None
@@ -47,6 +53,7 @@ class PaintLabel(QLabel):
         self.is_drawing = True
         self._painting = False
         self._zoom_factor = 1.0
+        self._fit_scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
         self._original_pixmap = None
@@ -122,14 +129,17 @@ class PaintLabel(QLabel):
         orig_w = self._original_pixmap.width()
         orig_h = self._original_pixmap.height()
 
-        parent_widget = self.parentWidget()
-        viewport_size = parent_widget.size() if parent_widget else self.size()
+        scroll_area = getattr(self, "scroll_area", None)
+        viewport_size = (
+            scroll_area.viewport().size() if scroll_area is not None else self.size()
+        )
 
         fit_scale = min(
             viewport_size.width() / orig_w,
             viewport_size.height() / orig_h,
         )
 
+        self._fit_scale = fit_scale
         current_scale = fit_scale * self._zoom_factor
 
         new_w = max(1, int(orig_w * current_scale))
@@ -144,10 +154,9 @@ class PaintLabel(QLabel):
         self.setPixmap(scaled)
         self._scale = orig_w / new_w
 
-        if self._zoom_factor != 1.0:
-            self.setMinimumSize(new_w, new_h)
-        else:
-            self.setMinimumSize(0, 0)
+        # Увеличение картинки должно прокручиваться внутри viewport, не
+        # передавая её размер в sizeHint родительского окна.
+        self.setMinimumSize(self._base_zoom_minimum)
 
         self._offset_x = (self.width() - scaled.width()) / 2.0
         self._offset_y = (self.height() - scaled.height()) / 2.0
@@ -200,7 +209,8 @@ class LabelingWindow(QMainWindow):
     def __init__(self, session_dir: Path, parent=None):
         super().__init__(parent)
         self.session_dir = session_dir.resolve()
-        self.source_dir = self.session_dir
+        ensure_session_structure(self.session_dir)
+        self.source_dir = self.session_dir / "source"
         self.masks_dir = self.session_dir / "masks"
         self.cropped_dir = self.session_dir / "cropped"
         self.cropped_masks_dir = self.session_dir / "cropped_masks"
@@ -213,14 +223,18 @@ class LabelingWindow(QMainWindow):
         self.paint_label = PaintLabel()
 
         self._init_ui()
+        self._responsive_sizer = install_application_responsive_sizing(
+            self, minimum_scale=0.75
+        )
         self._load_file_list()
 
     def _init_ui(self):
-        self.setWindowTitle(f"Разметка — {self.session_dir.name}")
+        self.setWindowTitle(f"Разметка — {self.session_dir}")
 
         central = QWidget()
         self.setCentralWidget(central)
         root = QHBoxLayout(central)
+        self.root_layout = root
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
@@ -229,21 +243,36 @@ class LabelingWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+        if not getattr(self, "_initial_maximized_applied", False):
+            self._initial_maximized_applied = True
+            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._responsive_sizer is not None:
+            self._responsive_sizer.update_scale()
 
     def _create_file_panel(self, root: QHBoxLayout):
         panel = QFrame()
-        panel.setFixedWidth(240)
+        self.file_panel = panel
+        panel.setMinimumWidth(280)
+        panel.setMaximumWidth(320)
         panel.setStyleSheet(
             "QFrame { background-color: #181825; border-radius: 10px; }"
         )
         vl = QVBoxLayout(panel)
+        self.file_panel_layout = vl
         vl.setContentsMargins(10, 10, 10, 10)
         vl.setSpacing(8)
 
         title = QLabel("📁 Тестовые изображения")
         title.setStyleSheet("font-weight: bold; font-size: 14px; color: #89b4fa;")
         vl.addWidget(title)
+
+        self.path_label = QLabel()
+        self.path_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self.path_label.setWordWrap(True)
+        vl.addWidget(self.path_label)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["📁 Исходные изображения", "✂️ Обрезки чашек"])
@@ -258,20 +287,20 @@ class LabelingWindow(QMainWindow):
         self.file_list.itemClicked.connect(self._on_file_selected)
         vl.addWidget(self.file_list, stretch=1)
 
-        btn_refresh = QPushButton("🔄 Обновить")
-        btn_refresh.setStyleSheet(
+        self.btn_refresh = QPushButton("🔄 Обновить")
+        self.btn_refresh.setStyleSheet(
             "background-color: #45475a; font-size: 12px; padding: 6px;"
         )
-        btn_refresh.clicked.connect(self._load_file_list)
-        vl.addWidget(btn_refresh)
+        self.btn_refresh.clicked.connect(self._load_file_list)
+        vl.addWidget(self.btn_refresh)
 
-        btn_add = QPushButton("📂 Добавить изображения")
-        btn_add.setStyleSheet(
+        self.btn_add_images = QPushButton("📂 Добавить изображения")
+        self.btn_add_images.setStyleSheet(
             "background-color: #a6e3a1; color: #1e1e2e; font-weight: bold; "
             "font-size: 12px; padding: 6px;"
         )
-        btn_add.clicked.connect(self._on_add_images)
-        vl.addWidget(btn_add)
+        self.btn_add_images.clicked.connect(self._on_add_images)
+        vl.addWidget(self.btn_add_images)
 
         self._create_petri_panel(vl)
 
@@ -283,6 +312,7 @@ class LabelingWindow(QMainWindow):
             "QFrame { background-color: #1e1e2e; border-radius: 8px; }"
         )
         pl = QVBoxLayout(self.petri_frame)
+        self.petri_layout = pl
         pl.setContentsMargins(8, 8, 8, 8)
         pl.setSpacing(6)
 
@@ -306,21 +336,21 @@ class LabelingWindow(QMainWindow):
         self.spin_cy.valueChanged.connect(self._on_spinner_changed)
         self.spin_radius.valueChanged.connect(self._on_spinner_changed)
 
-        btn_auto = QPushButton("🔍 Авто-поиск")
-        btn_auto.setStyleSheet(
+        self.btn_auto_detect = QPushButton("🔍 Авто-поиск")
+        self.btn_auto_detect.setStyleSheet(
             "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; "
             "padding: 6px; font-size: 12px;"
         )
-        btn_auto.clicked.connect(self._on_auto_detect)
-        pl.addWidget(btn_auto)
+        self.btn_auto_detect.clicked.connect(self._on_auto_detect)
+        pl.addWidget(self.btn_auto_detect)
 
-        btn_crop = QPushButton("✂️ Обрезать по чашке")
-        btn_crop.setStyleSheet(
+        self.btn_crop = QPushButton("✂️ Обрезать по чашке")
+        self.btn_crop.setStyleSheet(
             "background-color: #a6e3a1; color: #1e1e2e; font-weight: bold; "
             "padding: 6px; font-size: 12px;"
         )
-        btn_crop.clicked.connect(self._on_crop)
-        pl.addWidget(btn_crop)
+        self.btn_crop.clicked.connect(self._on_crop)
+        pl.addWidget(self.btn_crop)
 
         parent.addWidget(self.petri_frame)
 
@@ -331,6 +361,7 @@ class LabelingWindow(QMainWindow):
         )
         wrapper.setStyleSheet("background-color: #1e1e2e; border-radius: 10px;")
         vl = QVBoxLayout(wrapper)
+        self.image_layout = vl
         vl.setContentsMargins(8, 8, 8, 8)
         vl.setSpacing(8)
 
@@ -349,6 +380,8 @@ class LabelingWindow(QMainWindow):
             "QScrollBar::add-line, QScrollBar::sub-line { height: 0; }"
         )
         scroll.setWidget(self.paint_label)
+        self.image_scroll_area = scroll
+        self.paint_label.scroll_area = scroll
         vl.addWidget(scroll, stretch=1)
 
         self._create_toolbar(vl)
@@ -358,71 +391,76 @@ class LabelingWindow(QMainWindow):
     def _create_toolbar(self, parent: QVBoxLayout):
         bar = QFrame()
         bar.setStyleSheet("QFrame { background-color: #181825; border-radius: 8px; }")
-        hl = QHBoxLayout(bar)
-        hl.setContentsMargins(12, 4, 12, 4)
-        hl.setSpacing(6)
+        hl = QVBoxLayout(bar)
+        self.toolbar_layout = hl
+        hl.setContentsMargins(8, 4, 8, 4)
+        hl.setSpacing(4)
+        brush_zoom_row = QHBoxLayout()
+        brush_zoom_row.setSpacing(4)
+        editing_row = QHBoxLayout()
+        editing_row.setSpacing(4)
+        persistence_row = QHBoxLayout()
+        persistence_row.setSpacing(4)
 
-        hl.addWidget(QLabel("Размер кисти:"))
+        brush_zoom_row.addWidget(QLabel("Размер кисти:"))
 
-        btn_brush_minus = QPushButton("−")
-        btn_brush_minus.setFixedWidth(24)
-        btn_brush_minus.setStyleSheet(
+        self.btn_brush_minus = QPushButton("−")
+        self.btn_brush_minus.setFixedWidth(44)
+        self.btn_brush_minus.setStyleSheet(
             "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
-        btn_brush_minus.clicked.connect(self._on_brush_decrease)
-        hl.addWidget(btn_brush_minus)
+        self.btn_brush_minus.clicked.connect(self._on_brush_decrease)
+        brush_zoom_row.addWidget(self.btn_brush_minus)
 
         self.brush_size_label = QLabel("20 px")
-        self.brush_size_label.setFixedWidth(32)
+        self.brush_size_label.setFixedWidth(44)
         self.brush_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hl.addWidget(self.brush_size_label)
+        brush_zoom_row.addWidget(self.brush_size_label)
 
-        btn_brush_plus = QPushButton("+")
-        btn_brush_plus.setFixedWidth(24)
-        btn_brush_plus.setStyleSheet(
+        self.btn_brush_plus = QPushButton("+")
+        self.btn_brush_plus.setFixedWidth(44)
+        self.btn_brush_plus.setStyleSheet(
             "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
-        btn_brush_plus.clicked.connect(self._on_brush_increase)
-        hl.addWidget(btn_brush_plus)
-
-        hl.addStretch()
+        self.btn_brush_plus.clicked.connect(self._on_brush_increase)
+        brush_zoom_row.addWidget(self.btn_brush_plus)
+        brush_zoom_row.addStretch()
 
         self.zoom_label = QLabel("100%")
         self.zoom_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
-        self.zoom_label.setFixedWidth(36)
+        self.zoom_label.setFixedWidth(56)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hl.addWidget(self.zoom_label)
+        brush_zoom_row.addWidget(self.zoom_label)
 
-        btn_zoom_in = QPushButton("+")
-        btn_zoom_in.setFixedWidth(24)
-        btn_zoom_in.setStyleSheet(
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_in.setFixedWidth(44)
+        self.btn_zoom_in.setStyleSheet(
             "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
-        btn_zoom_in.clicked.connect(self._on_zoom_in)
-        hl.addWidget(btn_zoom_in)
+        self.btn_zoom_in.clicked.connect(self._on_zoom_in)
+        brush_zoom_row.addWidget(self.btn_zoom_in)
 
-        btn_zoom_out = QPushButton("−")
-        btn_zoom_out.setFixedWidth(24)
-        btn_zoom_out.setStyleSheet(
+        self.btn_zoom_out = QPushButton("−")
+        self.btn_zoom_out.setFixedWidth(44)
+        self.btn_zoom_out.setStyleSheet(
             "background-color: #45475a; padding: 2px; font-size: 11px;"
         )
-        btn_zoom_out.clicked.connect(self._on_zoom_out)
-        hl.addWidget(btn_zoom_out)
+        self.btn_zoom_out.clicked.connect(self._on_zoom_out)
+        brush_zoom_row.addWidget(self.btn_zoom_out)
 
-        btn_zoom_reset = QPushButton("1:1")
-        btn_zoom_reset.setStyleSheet(
+        self.btn_zoom_reset = QPushButton("1:1")
+        self.btn_zoom_reset.setMinimumWidth(56)
+        self.btn_zoom_reset.setStyleSheet(
             "background-color: #45475a; padding: 2px 6px; font-size: 11px;"
         )
-        btn_zoom_reset.clicked.connect(self._on_zoom_reset)
-        hl.addWidget(btn_zoom_reset)
-
-        hl.addStretch()
+        self.btn_zoom_reset.clicked.connect(self._on_zoom_reset)
+        brush_zoom_row.addWidget(self.btn_zoom_reset)
 
         self.view_combo = QComboBox()
         self.view_combo.addItems(["🖼 Изображение + маска", "🏁 Только маска"])
         self.view_combo.setStyleSheet("font-size: 12px; padding: 4px 8px;")
         self.view_combo.currentIndexChanged.connect(self._on_view_changed)
-        hl.addWidget(self.view_combo)
+        editing_row.addWidget(self.view_combo, stretch=1)
 
         self.btn_draw = QPushButton("✏️ Рисовать")
         self.btn_draw.setStyleSheet(
@@ -430,37 +468,48 @@ class LabelingWindow(QMainWindow):
             "padding: 6px 14px;"
         )
         self.btn_draw.clicked.connect(lambda: self._set_mode(True))
-        hl.addWidget(self.btn_draw)
+        editing_row.addWidget(self.btn_draw)
 
         self.btn_erase = QPushButton("🧹 Ластик")
         self.btn_erase.setStyleSheet("background-color: #45475a; padding: 6px 14px;")
         self.btn_erase.clicked.connect(lambda: self._set_mode(False))
-        hl.addWidget(self.btn_erase)
+        editing_row.addWidget(self.btn_erase)
 
-        btn_clear = QPushButton("🗑 Очистить")
-        btn_clear.setStyleSheet(
+        self.btn_clear = QPushButton("🗑 Очистить")
+        self.btn_clear.setStyleSheet(
             "background-color: #f38ba8; color: #1e1e2e; padding: 6px 14px;"
         )
-        btn_clear.clicked.connect(self._on_clear)
-        hl.addWidget(btn_clear)
+        self.btn_clear.clicked.connect(self._on_clear)
+        persistence_row.addWidget(self.btn_clear)
 
-        btn_save = QPushButton("💾 Сохранить маску")
-        btn_save.setStyleSheet(
+        self.btn_save = QPushButton("💾 Сохранить маску")
+        self.btn_save.setStyleSheet(
             "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; "
             "padding: 6px 14px;"
         )
-        btn_save.clicked.connect(self._on_save)
-        hl.addWidget(btn_save)
+        self.btn_save.clicked.connect(self._on_save)
+        persistence_row.addWidget(self.btn_save)
 
-        hl.addSpacing(6)
-
-        btn_export = QPushButton("📦 Экспорт в ZIP")
-        btn_export.setStyleSheet(
+        self.btn_export = QPushButton("📦 Экспорт в ZIP")
+        self.btn_export.setStyleSheet(
             "background-color: #f9e2af; color: #1e1e2e; font-weight: bold; "
             "padding: 6px 14px;"
         )
-        btn_export.clicked.connect(self._on_export_zip)
-        hl.addWidget(btn_export)
+        self.btn_export.clicked.connect(self._on_export_zip)
+        persistence_row.addWidget(self.btn_export)
+
+        for widget in (
+            self.view_combo,
+            self.btn_draw,
+            self.btn_erase,
+            self.btn_clear,
+            self.btn_save,
+            self.btn_export,
+        ):
+            widget.setMinimumWidth(0)
+        hl.addLayout(brush_zoom_row)
+        hl.addLayout(editing_row)
+        hl.addLayout(persistence_row)
 
         parent.addWidget(bar)
 
@@ -496,18 +545,23 @@ class LabelingWindow(QMainWindow):
     def _set_mode(self, drawing: bool):
         self.paint_label.is_drawing = drawing
         if drawing:
-            self.btn_draw.setStyleSheet(
+            set_responsive_stylesheet(
+                self.btn_draw,
                 "background-color: #a6e3a1; color: #1e1e2e; font-weight: bold; "
-                "padding: 6px 14px;"
+                "padding: 6px 14px;",
             )
-            self.btn_erase.setStyleSheet(
-                "background-color: #45475a; padding: 6px 14px;"
+            set_responsive_stylesheet(
+                self.btn_erase, "background-color: #45475a; padding: 6px 14px;"
             )
         else:
-            self.btn_draw.setStyleSheet("background-color: #45475a; padding: 6px 14px;")
-            self.btn_erase.setStyleSheet(
+            set_responsive_stylesheet(
+                self.btn_draw,
+                "background-color: #45475a; padding: 6px 14px;",
+            )
+            set_responsive_stylesheet(
+                self.btn_erase,
                 "background-color: #f38ba8; color: #1e1e2e; font-weight: bold; "
-                "padding: 6px 14px;"
+                "padding: 6px 14px;",
             )
 
     def _on_clear(self):
@@ -527,6 +581,10 @@ class LabelingWindow(QMainWindow):
 
     def _get_mask_dir(self):
         return self.controller.get_mask_dir(self.session_dir, self.mode)
+
+    def _update_path_label(self):
+        working = self._get_current_dir()
+        self.path_label.setText(f"📁 {working}")
 
     def _on_add_images(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -572,6 +630,7 @@ class LabelingWindow(QMainWindow):
             item = QListWidgetItem(f.name)
             item.setData(Qt.ItemDataRole.UserRole, str(f))
             self.file_list.addItem(item)
+        self._update_path_label()
 
     def _on_file_selected(self, item: QListWidgetItem):
         path = Path(item.data(Qt.ItemDataRole.UserRole))

@@ -5,12 +5,22 @@ __pycache__/
 dist/
 build/
 
+# Nuitka build artifacts
+BacteriaAnalyzer
+BacteriaAnalyzer.exe
+main.dist/
+main.build/
+main.onefile-build/
+
 # Virtual environments
 .venv/
 .venv-dev/
+.venv-full/
+.venv-build/
 
 # Generated training data
 train/data/
+train/runs/
 train/runs/**/*.pt
 train/runs/**/*.onnx.data
 train/runs/**/tensorboard/
@@ -18,6 +28,9 @@ train/runs/**/report.html
 
 # Test reports
 test_report.html
+
+# Generated datasets
+datasets/*_imported/
 coverage/
 .coverage
 coverage.xml
@@ -38,8 +51,17 @@ coverage.xml
 Thumbs.db
 
 # Opencode
-.opencode/node_modules/
+.opencode/
 opencode.json
 
-# Docs
-docs/
+# Docs (whitelist specific files)
+/docs/*
+!docs/testing-quality.md
+!docs/user-guide.md
+!docs/dataset-training-pipeline.md
+!docs/datasets.md
+!docs/architecture.md
+!docs/algorithms.md
+
+# Evaluation reports (track JSON, ignore regeneratable HTML)
+evaluations/*/report.html

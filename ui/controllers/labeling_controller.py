@@ -71,24 +71,18 @@ class LabelingController:
     def get_current_dir(self, session_dir: Path, mode: str) -> Path:
         if mode == "source":
             sub = session_dir / "source"
-            if sub.is_dir() and any(
-                f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
-            ):
-                return sub
-            return session_dir
-        sub = session_dir / "cropped"
-        if sub.is_dir() and any(
-            f.suffix.lower() in SUPPORTED_EXTENSIONS for f in sub.iterdir()
-        ):
-            return sub
-        return session_dir
+        else:
+            sub = session_dir / "cropped"
+        sub.mkdir(parents=True, exist_ok=True)
+        return sub
 
     def get_mask_dir(self, session_dir: Path, mode: str) -> Path:
         if mode == "source":
             sub = session_dir / "masks"
-            return sub if sub.is_dir() else session_dir / "masks"
-        sub = session_dir / "cropped_masks"
-        return sub if sub.is_dir() else session_dir / "cropped_masks"
+        else:
+            sub = session_dir / "cropped_masks"
+        sub.mkdir(parents=True, exist_ok=True)
+        return sub
 
     def list_image_files(self, directory: Path) -> list[Path]:
         if not directory.exists():

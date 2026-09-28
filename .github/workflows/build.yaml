@@ -4,14 +4,81 @@ on:
   pull_request:
     branches:
       - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  # Feature-ветки проверяются на каждый push через pull_request/synchronize.
+  # После merge develop сборка запускается на основной ветке репозитория.
   push:
     branches:
-      - develop
       - main
-      - feature/*
+      - master
+  # Позволяет вручную запустить проверку для ветки до открытия PR.
+  workflow_dispatch:
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_build: ${{ steps.filter.outputs.run_build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes outside OpenSpec
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run requested; running the full build matrix."
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$BASE_SHA" || -z "$AFTER_SHA" ]]; then
+              echo "Missing pull request base/merge SHA." >&2
+              exit 1
+            fi
+            # Для PR AFTER_SHA — synthetic merge commit, доступный и для fork PR.
+            diff_range=("$BASE_SHA" "$AFTER_SHA")
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
+              echo "New branch push; running the full build matrix."
+              echo "run_build=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            diff_range=("$BEFORE_SHA" "$AFTER_SHA")
+          else
+            echo "Unexpected workflow event: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          if git diff --no-renames --quiet "${diff_range[@]}" -- . ':(exclude)openspec/**'; then
+            echo "run_build=false" >> "$GITHUB_OUTPUT"
+            echo "Only OpenSpec files changed; skipping tests and packaging."
+          else
+            diff_status=$?
+            if [[ "$diff_status" -ne 1 ]]; then
+              echo "git diff failed with exit code $diff_status." >&2
+              exit "$diff_status"
+            fi
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "Changes outside OpenSpec detected; running tests and packaging."
+          fi
+
   build-executable:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_build == 'true'
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -19,7 +86,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Set git default branch
+        run: git config --global init.defaultBranch main
+
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
@@ -30,10 +100,10 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y g++ patchelf
+        run: sudo apt-get update && sudo apt-get install -y g++ patchelf ccache
 
       - name: Install project dependencies
-        run: uv sync --extra test
+        run: uv sync --extra dev
 
       - name: Lint and format check
         run: |
@@ -54,22 +124,46 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: uv run python -m pytest tests/ -v --tb=short -m "not slow and not gui"
 
-      - name: Install Nuitka
-        run: uv pip install nuitka zstandard
+      - name: Run GUI worker tests (Windows, offscreen)
+        if: matrix.os == 'windows-latest'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run python -m pytest tests/test_testing_window.py -v --tb=short -m gui
+
+      - name: Create clean runtime environment for build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-build uv sync --locked --exact
+          uv pip install --python .venv-build nuitka zstandard
+
+      - name: Create clean runtime environment for build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
+          uv sync --locked --exact
+          uv pip install --python .venv-build nuitka zstandard
 
       - name: Build executable (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          uv run python scripts/nuitka_build.py \
+          UV_PROJECT_ENVIRONMENT=.venv-build uv run --no-sync python scripts/nuitka_build.py \
             --standalone --onefile \
             --output-filename=BacteriaAnalyzer \
             main.py
+
+      - name: Verify packaged CPU inference (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          ./BacteriaAnalyzer --smoke-test-model NN:colony_seg
+          ./BacteriaAnalyzer --smoke-test-model NN:colony_mobilenet_v3_small
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          uv run python scripts/nuitka_build.py `
+          $env:UV_PROJECT_ENVIRONMENT = ".venv-build"
+          uv run --no-sync python scripts/nuitka_build.py `
             --standalone --onefile `
             --msvc=latest `
             --assume-yes-for-downloads `
@@ -78,16 +172,58 @@ jobs:
             --output-filename=BacteriaAnalyzer.exe `
             main.py
 
+      - name: Verify packaged CPU inference (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          .\BacteriaAnalyzer.exe --smoke-test-model NN:colony_seg
+          .\BacteriaAnalyzer.exe --smoke-test-model NN:colony_mobilenet_v3_small
+
       - name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BacteriaAnalyzer-Linux
           path: BacteriaAnalyzer
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BacteriaAnalyzer-Windows
           path: BacteriaAnalyzer.exe
+
+  required-ci:
+    name: required-ci
+    if: always()
+    needs:
+      - detect-changes
+      - build-executable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require change detection and, when needed, the build matrix
+        shell: bash
+        env:
+          DETECTION_RESULT: ${{ needs.detect-changes.result }}
+          RUN_BUILD: ${{ needs.detect-changes.outputs.run_build }}
+          BUILD_RESULT: ${{ needs.build-executable.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$DETECTION_RESULT" != "success" ]]; then
+            echo "Change detection did not succeed: $DETECTION_RESULT" >&2
+            exit 1
+          fi
+
+          if [[ "$RUN_BUILD" == "true" && "$BUILD_RESULT" == "success" ]]; then
+            echo "Required Linux/Windows build matrix passed."
+            exit 0
+          fi
+
+          if [[ "$RUN_BUILD" == "false" && "$BUILD_RESULT" == "skipped" ]]; then
+            echo "Only OpenSpec files changed; build matrix was correctly skipped."
+            exit 0
+          fi
+
+          echo "Unexpected build decision/result: run_build=$RUN_BUILD, build=$BUILD_RESULT" >&2
+          exit 1

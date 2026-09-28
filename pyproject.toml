@@ -1,13 +1,14 @@
 [project]
 name = "bacterial-colony-analyzer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Анализатор бактериальных колоний на изображениях чашек Петри"
 requires-python = ">=3.13"
 dependencies = [
     "PyQt6>=6.4.0",
     "opencv-python-headless>=4.8.0",
     "numpy>=1.24.0",
-    "tqdm>=4.65.0",
+    "psutil>=5.9.0",
+    "onnxruntime>=1.18.0",
 ]
 
 [project.optional-dependencies]
@@ -19,10 +20,14 @@ test = [
     "hypothesis>=6.100.0",
 ]
 dev = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
     "nuitka>=4.0.0",
     "zstandard>=0.25.0",
+    "bacterial-colony-analyzer[test]",
+]
+full = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "onnxscript",
     "tensorboard>=2.17.0",
     "plotly>=5.18.0",
     "fastapi>=0.109.0",
@@ -30,8 +35,8 @@ dev = [
     "websockets>=12.0",
     "rich>=13.7.0",
     "albumentations>=1.3.0",
-    "onnxruntime>=1.18.0",
-    "bacterial-colony-analyzer[test]",
+    "tqdm>=4.65.0",
+    "bacterial-colony-analyzer[dev]",
 ]
 
 [build-system]
@@ -60,3 +65,7 @@ markers = [
 bacteria-analyzer = "main:main"
 augment = "train.augment:main"
 test-algorithms = "testing.__main__:main"
+import-22022540 = "train.importer_cli:main"
+baseline = "testing.__main__:main_baseline"
+evaluate = "testing.__main__:main_evaluate"
+train-colony = "train.colony_cli:main"
