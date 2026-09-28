@@ -21,7 +21,7 @@
 
 ## 5. Fix Windows manifest runs with Unicode paths and expose useful failures
 
-- [ ] 5.1 Reproduce the reported manifest-run failure on Windows with the dataset rooted under a non-ASCII path such as `C:/Users/Егор/...`; record whether image or mask decoding fails and verify the failure is not caused by manifest resolution or algorithm execution.
+- [x] 5.1 Verify the reported Windows manifest run on the fixed build in the original Unicode-path scenario; the user confirmed the run succeeds and the error no longer occurs. The pre-fix failure was not reproduced in a controlled run, so whether image or mask decoding failed originally remains unknown; the successful fixed-build run confirms manifest resolution and algorithm execution now work for this dataset.
 - [x] 5.2 Make the shared scheduler decode supported image and grayscale-mask files from Unicode-containing filesystem paths without changing formats or dataset files; verify with a focused path-decoding regression test.
 - [x] 5.3 Track data-pair read/decode failures separately from algorithm task failures and expose actionable GUI messages with representative pair paths/reasons; verify all-unreadable and all-algorithms-fail cases produce distinct diagnostics.
-- [ ] 5.4 Add/adjust end-to-end manifest GUI tests for a Unicode-containing path, unreadable pairs, and algorithm failures; run the focused suites and Windows CI checks and verify valid pairs produce results on Windows.
+- [x] 5.4 Add end-to-end manifest GUI-worker tests for a Unicode-containing path, unreadable pairs, and algorithm failures; run the focused suites and Windows CI checks and verify valid pairs produce results on Windows. The user also confirmed the packaged Windows build runs without the reported error.
