@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from testing.dataset import TestDataset
+from testing.baseline import BaselineDataset
 from testing.dashboard import generate_report
 from testing.onnx_algorithm import OnnxModelAlgorithm
 from testing.registry import (
@@ -38,8 +38,43 @@ from testing.registry import (
     register_algorithm_instance,
 )
 from testing.runner import run_all, compare_algorithms
+from testing.scheduler import PipelineDiagnostics
 from testing.telemetry import TelemetryCollector
 from .responsive import install_application_responsive_sizing
+
+
+class _DatasetView:
+    """Представление выбранных GUI образцов без изменения общего загрузчика."""
+
+    def __init__(self, root: Path, samples):
+        self.root = root
+        self.samples = samples
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __iter__(self):
+        return iter(self.samples)
+
+
+def _limit_gui_dataset(dataset, sample_limit: int | None):
+    if sample_limit is None:
+        return dataset
+
+    source_names = sorted(
+        sample.name for sample in dataset.samples if sample.variant == "source"
+    )[:sample_limit]
+    selected_source_names = set(source_names)
+    samples = [
+        sample
+        for sample in dataset.samples
+        if (sample.variant == "source" and sample.name in selected_source_names)
+        or (
+            sample.variant == "cropped"
+            and sample.name.removesuffix("_cropped") in selected_source_names
+        )
+    ]
+    return _DatasetView(dataset.root, samples)
 
 
 class _RunWorker(QObject):
@@ -69,14 +104,29 @@ class _RunWorker(QObject):
 
     def run(self):
         try:
-            dataset = TestDataset(
-                root=self.data_root,
-                sample_limit=self.sample_limit,
-                load_images=False,
-            )
+            try:
+                dataset = BaselineDataset(
+                    root=self.data_root,
+                )
+            except RuntimeError as exc:
+                if "No valid image-mask pairs found" not in str(exc):
+                    raise
+                self.failed.emit(
+                    "No test samples found. Проверьте, что папка содержит "
+                    "пары изображение + эталонная маска."
+                )
+                return
+            except Exception as exc:  # noqa: BLE001 — ошибка структуры или манифеста
+                self.failed.emit(
+                    "Не удалось загрузить датасет или прочитать манифест "
+                    f"dataset.json: {exc}"
+                )
+                return
+            dataset = _limit_gui_dataset(dataset, self.sample_limit)
             if len(dataset) == 0:
                 self.failed.emit(
-                    "No test samples found. Пополните датасет парами изображение + маска."
+                    "No test samples found. Проверьте, что папка содержит "
+                    "пары изображение + эталонная маска."
                 )
                 return
 
@@ -89,13 +139,38 @@ class _RunWorker(QObject):
                 enabled=self.telemetry_enabled,
                 output_path=performance_output,
             )
+            diagnostics = PipelineDiagnostics()
             all_results = run_all(
                 dataset,
                 algorithms=self.algorithm_names,
                 workers=self.workers,
                 batch_size=self.batch_size,
                 telemetry=telemetry,
+                diagnostics=diagnostics,
             )
+            if not any(
+                sample_results
+                for algorithm_results in all_results.values()
+                for sample_results in algorithm_results.values()
+            ):
+                if diagnostics.loaded_pairs == 0:
+                    details = "\n".join(diagnostics.load_failure_details)
+                    suffix = f"\nПримеры проблем:\n{details}" if details else ""
+                    self.failed.emit(
+                        "Не удалось прочитать ни одной пары изображения и маски. "
+                        f"Неуспешных пар: {diagnostics.load_failure_count}. "
+                        f"Проверьте файлы и пути датасета.{suffix}"
+                    )
+                else:
+                    details = "\n".join(diagnostics.algorithm_failure_details)
+                    suffix = f"\nПримеры ошибок:\n{details}" if details else ""
+                    self.failed.emit(
+                        "Все запуски выбранных алгоритмов завершились с ошибкой "
+                        f"для {diagnostics.loaded_pairs} прочитанных пар. "
+                        f"Неуспешных задач: {diagnostics.algorithm_failure_count}. "
+                        f"Проверьте модели и параметры алгоритмов.{suffix}"
+                    )
+                return
 
             comparison = None
             if self.compare_pair:
@@ -169,13 +244,20 @@ class TestingWindow(QMainWindow):
 
         hint = QLabel(
             "Датасет — папка с парными изображениями и эталонными масками. "
-            "Должна содержать четыре поддиректории:\n"
-            "source/ (исходные фото чашек), masks/ (эталонные маски к ним, "
-            "имя_файла_mask.png),\n"
-            "cropped/ (обрезки чашек), cropped_masks/ (маски обрезков, "
-            "имя_файла_cropped_mask.png)."
+            "Поддерживаются два формата:<br>"
+            "<b>Legacy:</b> source/ (исходные фото), masks/ (маски с суффиксом "
+            "_mask), cropped/ (обрезки), cropped_masks/ (маски обрезков с "
+            "суффиксом _cropped_mask).<br>"
+            "<b>Manifest:</b> корневая папка с dataset.json, содержащим "
+            "относительные пути к изображениям и маскам; расширения файлов "
+            "могут различаться. Для импорта 22022540 укажите "
+            "datasets/22022540_imported.<br>"
+            '<a href="https://github.com/Egel68/bacterial-colony-area/blob/main/docs/datasets.md">'
+            "Каталог источников, версий и цитирования датасетов</a>."
         )
         hint.setObjectName("info")
+        hint.setTextFormat(Qt.TextFormat.RichText)
+        hint.setOpenExternalLinks(True)
         hint.setWordWrap(True)
         ds_form.addRow(hint)
         root_layout.addWidget(dataset_group)

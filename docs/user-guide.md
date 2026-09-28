@@ -10,7 +10,8 @@
 [algorithms.md](algorithms.md) — справочник алгоритмов и контракт моделей,
 [testing-quality.md](testing-quality.md) — метрики и отчёты,
 [dataset-training-pipeline.md](dataset-training-pipeline.md) — путь от сырого
-датасета до модели в приложении.
+датасета до модели в приложении,
+[datasets.md](datasets.md) — источники, версии и цитирование внешних датасетов.
 
 ## Содержание
 
@@ -227,7 +228,10 @@ cropped/sample_cropped.png         cropped_masks/sample_cropped_mask.png
 Тестирование доступно из главного окна и через CLI. Результат прогноза сравнивается
 с эталонной бинарной маской по IoU, Dice, F1, Precision, Recall и Accuracy.
 
-### Формат датасета для GUI и `report`
+### Форматы датасетов для GUI и CLI `report`
+
+Ссылки на источники, лицензии и цитирование используемых внешних наборов собраны в
+[каталоге датасетов](datasets.md).
 
 Обычная структура:
 
@@ -239,8 +243,11 @@ test_images/
 └── cropped_masks/sample_cropped_mask.png # необязательно
 ```
 
-GUI тестирования и CLI `report` используют `TestDataset`, который ожидает
-расширение маски, совпадающее с расширением изображения.
+GUI тестирования использует `BaselineDataset`: он читает legacy-структуру,
+importer-структуру и `dataset.json`, где можно явно указать пути к изображениям и
+маскам с разными расширениями. CLI `report` использует `TestDataset` и conventional
+пары в четырёх каталогах; у него расширения изображения и маски должны совпадать.
+Для импортированного 22022540 выберите корень `datasets/22022540_imported`.
 
 ### GUI
 
@@ -403,6 +410,9 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync import-22022540 \
 - `--split` — записать воспроизводимый train/val/test split;
 - `--seed N` — seed разбиения, по умолчанию 42;
 - `--verify` — сверить количества COCO-боксов с YOLO/VOC-дублями, если они есть.
+
+Версия исходного датасета, публикация, лицензия и ограничения локального
+сопоставления приведены в [каталоге внешних датасетов](datasets.md#annotated-dataset-for-deep-learning-based-bacterial-colony-detection-22022540).
 
 Если при `--crop` чашку на снимке не удалось найти, cropped-вариант для неё может
 не появиться. При `--split` разбиение стратифицируется по категории COCO на уровне
@@ -601,12 +611,13 @@ UV_PROJECT_ENVIRONMENT=.venv-dev uv run --no-sync pytest -m "not slow and not gu
   labeler сохранит `*_mask.png`, а загрузчик пары может ожидать `*_mask.jpg` или
   `*_mask.tiff`; подготовьте одинаковые расширения/имена либо опишите точные пути
   в `dataset.json`.
-- **GUI и CLI `report` не читают `dataset.json`.** Они используют conventional-
-  пары `source/` + `masks/`. Режимы `baseline`/`evaluate` читают importer-структуру и
-  manifest; обучение также использует manifest.
+- **GUI и CLI `report` используют разные загрузчики.** GUI тестирования читает
+  `dataset.json`, importer-структуру и legacy `source/` + `masks/` через
+  `BaselineDataset`; CLI `report` по-прежнему ожидает conventional-пары через
+  `TestDataset`. Режимы `baseline`/`evaluate` и обучение также читают manifest.
 - **COCO-импорт создаёт PNG-маски.** Пути к ним записаны в `dataset.json`, поэтому
-  manifest-обучение и `baseline`/`evaluate` могут прочитать такие пары. Для GUI
-  тестирования или `report` подготовьте пары в ожидаемой ими структуре.
+  GUI тестирования, manifest-обучение и `baseline`/`evaluate` могут прочитать такие
+  пары. CLI `report` требует обычную структуру `TestDataset`.
 - **Обучение бинарное.** Маски с несколькими классами пока не поддерживаются.
 - **COCO bbox — приблизительная разметка.** Эллипс внутри bbox не является ручным
   точным контуром колонии.

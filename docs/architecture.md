@@ -487,7 +487,7 @@ _all_names() -> list[str]                            # приватный хел
 
 Два независимых загрузчика с разными возможностями.
 
-#### `TestDataset` (`testing/dataset.py`) — для режима `report` и GUI
+#### `TestDataset` (`testing/dataset.py`) — для режима `report`
 
 ```python
 TestDataset(root="test_images", sample_limit=None, load_images=True)
@@ -512,13 +512,13 @@ TestDataset(root="test_images", sample_limit=None, load_images=True)
 
 - Расширение маски **обязано совпадать** с расширением изображения: JPG-исходник
   требует `masks/{stem}_mask.jpg`. Это главное ограничение формата.
-- `load_images=False` — не читать массивы, только пути. Используется в
-  `test-algorithms` и GUI, где загрузкой занимается планировщик.
+- `load_images=False` — не читать массивы, только пути. Используется в режиме
+  `report`, где загрузкой занимается планировщик.
 - `sample_limit` ограничивает число **исходников** (считается в порядке
   сортировки); обрезки сверх лимита не читаются.
 - `dataset.json` **не читается**. Этот загрузчик понимает только четыре папки.
 
-#### `BaselineDataset` (`testing/baseline.py`) — для `baseline` и `evaluate`
+#### `BaselineDataset` (`testing/baseline.py`) — для GUI, `baseline` и `evaluate`
 
 ```python
 BaselineDataset(root, sample_limit=None)
@@ -542,17 +542,18 @@ BaselineDataset(root, sample_limit=None)
 found in …")`. Разница в нюансе: для `importer` маски лежат **внутри**
 `source/`, для `legacy` — в отдельной папке `masks/`.
 
-`sample_limit` применяется **после** загрузки всех записей и выбирает
-`sample_limit` уникальных имён из `source`-вариантов; в результат попадают
-все варианты выбранных объектов (включая `cropped`, имя которого получается
-через `removesuffix("_cropped")`).
+Для CLI `baseline`/`evaluate` параметр `sample_limit` применяется после загрузки
+записей и выбирает `sample_limit` уникальных имён из `source`-вариантов; в результат
+попадают все варианты выбранных объектов. GUI создаёт такое же ограниченное
+представление после загрузки, чтобы сохранить cropped-пары для выбранных source.
 
 #### Совместимость планировщика
 
 `scheduler._sample_refs(dataset)` поддерживает оба загрузчика: он смотрит на
 наличие атрибута `samples` и `source_path` у элементов. Поэтому один и тот же
 `execute_pipeline` обслуживает `report`, `baseline`, `evaluate` и GUI-окно
-тестирования.
+тестирования; GUI и `baseline`/`evaluate` используют `BaselineDataset`, а `report`
+— `TestDataset`.
 
 ### 6.4 Планировщик (`testing/scheduler.py`)
 

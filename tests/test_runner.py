@@ -84,13 +84,13 @@ class TestRunAll:
         )
 
         reads = []
-        original = scheduler.cv2.imread
+        original = scheduler._decode_file
 
-        def counting_imread(*args, **kwargs):
+        def counting_decode(*args, **kwargs):
             reads.append(args[0])
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(scheduler.cv2, "imread", counting_imread)
+        monkeypatch.setattr(scheduler, "_decode_file", counting_decode)
 
         results = run_all(
             paired_dataset,
@@ -118,6 +118,180 @@ class TestRunAll:
         )
 
         assert parallel == sequential
+
+    def test_manifest_pairs_under_unicode_path_run_successfully(self, tmp_path):
+        import json
+
+        import cv2
+
+        from testing.baseline import BaselineDataset
+
+        root = tmp_path / "Егор" / "22022540_imported"
+        source = root / "source"
+        source.mkdir(parents=True)
+        image_path = source / "sample.jpg"
+        mask_path = source / "sample_mask.png"
+        image = np.full((24, 20, 3), 92, dtype=np.uint8)
+        mask = np.zeros((24, 20), dtype=np.uint8)
+
+        for path, array, extension in (
+            (image_path, image, ".jpg"),
+            (mask_path, mask, ".png"),
+        ):
+            ok, encoded = cv2.imencode(extension, array)
+            assert ok
+            path.write_bytes(encoded.tobytes())
+
+        (root / "dataset.json").write_text(
+            json.dumps(
+                {
+                    "samples": [
+                        {
+                            "id": "sample",
+                            "kind": "source",
+                            "image": "source/sample.jpg",
+                            "mask": "source/sample_mask.png",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        dataset = BaselineDataset(root)
+        assert len(dataset) == 1
+        assert dataset.samples[0].image_path == image_path
+        assert dataset.samples[0].mask_path == mask_path
+
+        results = run_all(
+            dataset,
+            algorithms=["AlgoA"],
+            workers=1,
+            batch_size=1,
+        )
+
+        assert set(results["AlgoA"]) == {"sample"}
+        assert set(results["AlgoA"]["sample"]) == {"source"}
+
+    def test_pipeline_diagnostics_separate_load_and_algorithm_failures(self, tmp_path):
+        import json
+
+        import cv2
+
+        from testing.baseline import BaselineDataset
+        from testing.scheduler import PipelineDiagnostics
+
+        root = tmp_path / "diagnostics"
+        source = root / "source"
+        source.mkdir(parents=True)
+        image = np.full((24, 20, 3), 92, dtype=np.uint8)
+        mask = np.zeros((24, 20), dtype=np.uint8)
+        assert cv2.imwrite(str(source / "good.jpg"), image)
+        assert cv2.imwrite(str(source / "good_mask.png"), mask)
+        (source / "broken.jpg").write_bytes(b"not an image")
+        (source / "broken_mask.png").write_bytes(b"not a mask")
+        (root / "dataset.json").write_text(
+            json.dumps(
+                {
+                    "samples": [
+                        {
+                            "id": "good",
+                            "kind": "source",
+                            "image": "source/good.jpg",
+                            "mask": "source/good_mask.png",
+                        },
+                        {
+                            "id": "broken",
+                            "kind": "source",
+                            "image": "source/broken.jpg",
+                            "mask": "source/broken_mask.png",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        diagnostics = PipelineDiagnostics()
+
+        results = run_all(
+            BaselineDataset(root),
+            algorithms=["AlgoA"],
+            workers=1,
+            batch_size=1,
+            diagnostics=diagnostics,
+        )
+
+        assert set(results["AlgoA"]) == {"good"}
+        assert diagnostics.loaded_pairs == 1
+        assert diagnostics.completed_tasks == 1
+        assert diagnostics.load_failure_count == 1
+        assert "broken.jpg" in diagnostics.load_failure_details[0]
+        assert diagnostics.algorithm_failure_count == 0
+
+    def test_pipeline_diagnostics_for_all_algorithm_tasks_failing(self, tmp_path):
+        import json
+
+        import cv2
+
+        from testing.baseline import BaselineDataset
+        from testing.scheduler import PipelineDiagnostics
+
+        root = tmp_path / "all-algorithms-fail"
+        source = root / "source"
+        source.mkdir(parents=True)
+        assert cv2.imwrite(
+            str(source / "sample.jpg"), np.full((12, 12, 3), 64, dtype=np.uint8)
+        )
+        assert cv2.imwrite(
+            str(source / "sample_mask.png"), np.zeros((12, 12), dtype=np.uint8)
+        )
+        (root / "dataset.json").write_text(
+            json.dumps(
+                {
+                    "samples": [
+                        {
+                            "id": "sample",
+                            "kind": "source",
+                            "image": "source/sample.jpg",
+                            "mask": "source/sample_mask.png",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        class FailingAlgorithm(_FakeBase):
+            name = "FailingDiagnosticsAlgorithm"
+
+            def detect(self, image, is_cropped=False):
+                raise RuntimeError("synthetic algorithm task failure")
+
+        register_algorithm_instance(FailingAlgorithm.name, FailingAlgorithm())
+        try:
+            diagnostics = PipelineDiagnostics()
+            results = run_all(
+                BaselineDataset(root),
+                algorithms=[FailingAlgorithm.name],
+                workers=1,
+                batch_size=1,
+                diagnostics=diagnostics,
+            )
+        finally:
+            from testing.registry import _INSTANCES
+
+            _INSTANCES.pop(FailingAlgorithm.name, None)
+
+        assert results[FailingAlgorithm.name] == {}
+        assert diagnostics.loaded_pairs == 1
+        assert diagnostics.completed_tasks == 0
+        assert diagnostics.load_failure_count == 0
+        assert diagnostics.algorithm_failure_count == 1
+        assert "sample/source" in diagnostics.algorithm_failure_details[0]
+        assert (
+            "synthetic algorithm task failure"
+            in diagnostics.algorithm_failure_details[0]
+        )
 
 
 class TestCompareAlgorithms:

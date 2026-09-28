@@ -631,6 +631,7 @@ bacterial-colony-area/
 | [docs/architecture.md](docs/architecture.md) | **Архитектура кода**: слои, модули, сигнатуры, потоки данных, точки расширения, подводные камни |
 | [docs/algorithms.md](docs/algorithms.md) | **Алгоритмы детекции**: классика и ONNX-адаптеры, контракт модели, как добавить свой алгоритм |
 | [docs/dataset-training-pipeline.md](docs/dataset-training-pipeline.md) | Путь от сырого COCO-датасета до обученной модели в приложении |
+| [docs/datasets.md](docs/datasets.md) | Официальные источники, версии, цитирование, лицензии и связь датасетов с локальными папками |
 | [docs/testing-quality.md](docs/testing-quality.md) | Метрики, реестр алгоритмов, батчи и потоки, кэширование, telemetry, структура отчётов |
 | [models/README.md](models/README.md) | Как добавить свою ONNX-модель в `models/` |
 | [AGENTS.md](AGENTS.md) | Правила работы с репозиторием (для ИИ-агентов и контрибьюторов) |
@@ -642,8 +643,9 @@ bacterial-colony-area/
 - **Маски разметчика всегда в PNG.** Загрузчики тестовых пар ищут маску с тем же
   расширением, что у изображения. Для JPG/TIFF-исходника подготовьте одинаковые
   расширения либо укажите точные пути в `dataset.json`.
-- **GUI тестирования и `report` не читают `dataset.json`** — они ждут обычные пары
-  `source/` + `masks/`. Режимы `baseline`/`evaluate` и обучение работают с манифестом.
+- **GUI тестирования принимает legacy, importer и `dataset.json` manifest-структуры.**
+  CLI-режим `report` по-прежнему использует обычные пары через `TestDataset`;
+  `baseline`/`evaluate` и обучение также читают манифест.
 - **Обучение бинарное.** Multiclass-маски не поддерживаются: loss BCE+Dice, бинаризация
   порогом 0.5.
 - **COCO bbox → эллипс — приблизительная разметка** (weak labels), а не точный контур
