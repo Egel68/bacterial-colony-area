@@ -80,6 +80,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.run_build == 'true'
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
 

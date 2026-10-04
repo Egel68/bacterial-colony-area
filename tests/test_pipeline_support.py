@@ -794,6 +794,7 @@ def test_effective_workers_never_exceeds_task_count(monkeypatch):
     """Число workers не превышает число задач."""
     from testing import scheduler as sched
 
+    monkeypatch.setattr(sched, "_host_cpu_count", lambda: 32)
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: 32)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: 32.0)
     assert (
