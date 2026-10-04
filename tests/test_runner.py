@@ -3,7 +3,7 @@ import pytest
 
 from testing.interface import BaseDetectionAlgorithm
 from testing.registry import register_algorithm_instance
-from testing.runner import run_all, compare_algorithms
+from testing.runner import run_all, compare_algorithms, run_all_with_comparison
 
 
 class _FakeBase(BaseDetectionAlgorithm):
@@ -312,3 +312,102 @@ class TestCompareAlgorithms:
         comparison = compare_algorithms(paired_dataset, "AlgoA", "AlgoB")
         assert "cropped" in comparison["iou"]["s1"]
         assert comparison["iou"]["s1"]["cropped"] == "a"
+
+
+class TestRunAllWithComparison:
+    """Задача 3.4: прогон + парное сравнение без повторных детекций."""
+
+    def test_compared_algorithms_detected_once(self, paired_dataset):
+        class _Counting(_FakeBase):
+            name = "CountingA"
+            fill = 1
+
+            def __init__(self):
+                self.calls = 0
+
+            def detect(self, image, is_cropped=False):
+                self.calls += 1
+                return super().detect(image, is_cropped)
+
+        class _CountingB(_Counting):
+            name = "CountingB"
+            fill = 0
+
+        algo_a = _Counting()
+        algo_b = _CountingB()
+        register_algorithm_instance(algo_a.name, algo_a)
+        register_algorithm_instance(algo_b.name, algo_b)
+        try:
+            results, comparison = run_all_with_comparison(
+                paired_dataset,
+                algorithms=[algo_a.name, algo_b.name],
+                compare_pair=(algo_a.name, algo_b.name),
+            )
+        finally:
+            from testing.registry import _INSTANCES
+
+            _INSTANCES.pop(algo_a.name, None)
+            _INSTANCES.pop(algo_b.name, None)
+
+        # Одна пара (source + cropped) => ровно 2 вызова на алгоритм,
+        # а не 4 (прогон + повторное сравнение).
+        assert algo_a.calls == 2, f"AlgoA детектирован {algo_a.calls} раз"
+        assert algo_b.calls == 2, f"AlgoB детектирован {algo_b.calls} раз"
+
+        # Отображаемый набор алгоритмов сохранён.
+        assert set(results) == {algo_a.name, algo_b.name}
+
+        # Победители совпадают с ожидаемыми по метрикам прогонов.
+        assert comparison["iou"]["s1"]["source"] == "a"
+        assert comparison["iou"]["s1"]["cropped"] == "a"
+
+    def test_missing_compare_algorithms_computed_once(self, paired_dataset):
+        class _CountingMissing(_FakeBase):
+            name = "CountingMissing"
+            fill = 1
+
+            def __init__(self):
+                self.calls = 0
+
+            def detect(self, image, is_cropped=False):
+                self.calls += 1
+                return super().detect(image, is_cropped)
+
+        class _CountingVisible(_CountingMissing):
+            name = "CountingVisible"
+            fill = 1
+
+        missing = _CountingMissing()
+        visible = _CountingVisible()
+        register_algorithm_instance(missing.name, missing)
+        register_algorithm_instance(visible.name, visible)
+        try:
+            results, comparison = run_all_with_comparison(
+                paired_dataset,
+                algorithms=[visible.name],
+                compare_pair=(visible.name, missing.name),
+            )
+        finally:
+            from testing.registry import _INSTANCES
+
+            _INSTANCES.pop(missing.name, None)
+            _INSTANCES.pop(visible.name, None)
+
+        assert missing.calls == 2, "недостающий алгоритм посчитан повторно"
+        assert visible.calls == 2, "видимый алгоритм посчитан повторно"
+        # Состав отображаемого набора не изменился.
+        assert set(results) == {visible.name}
+        # Оба алгоритма дают одинаковые маски => ничья.
+        assert comparison["iou"]["s1"]["source"] == "tie"
+
+    def test_comparison_uses_main_run_metrics(self, paired_dataset):
+        results, comparison = run_all_with_comparison(
+            paired_dataset,
+            algorithms=["AlgoA", "AlgoB"],
+            compare_pair=("AlgoA", "AlgoB"),
+        )
+        standalone = compare_algorithms(paired_dataset, "AlgoA", "AlgoB")
+        assert comparison == standalone, (
+            "победители из основного прогона разошлись с отдельным сравнением"
+        )
+        assert results["AlgoA"]["s1"]["source"]["iou"] > 0

@@ -119,9 +119,10 @@ def test_worker_loads_manifest_jpeg_png_without_modifying_files(
     }
     runner_calls = {}
 
-    def fake_run_all(dataset, **kwargs):
+    def fake_run_all_with_comparison(dataset, **kwargs):
         runner_calls["dataset"] = dataset
         runner_calls["algorithms"] = kwargs["algorithms"]
+        runner_calls["compare_pair"] = kwargs.get("compare_pair")
         return {
             "ManifestSmoke": {
                 "sample": {
@@ -134,9 +135,11 @@ def test_worker_loads_manifest_jpeg_png_without_modifying_files(
                     }
                 }
             }
-        }
+        }, None
 
-    monkeypatch.setattr("ui.testing_window.run_all", fake_run_all)
+    monkeypatch.setattr(
+        "ui.testing_window.run_all_with_comparison", fake_run_all_with_comparison
+    )
     worker = _RunWorker(str(tmp_path), ["ManifestSmoke"])
     finished = []
     failed = []
@@ -313,7 +316,9 @@ def test_worker_manifest_results_keep_source_cropped_limit_and_comparison(
     assert extra["comparison"]["iou"]["sample-a_cropped"]["cropped"] == "tie"
     assert ((16, 16), False) in seen
     assert ((12, 12), True) in seen
-    assert len(seen) == 6  # run + comparison, each processes source and cropped.
+    # Задача 3.4: сравнение не повторяет детекции основного прогона.
+    # 2 алгоритма × (source + cropped) = 4 вызова, а не 6.
+    assert len(seen) == 4
 
 
 def test_worker_runs_selected_algorithm_on_coco_importer_output(
@@ -680,3 +685,536 @@ def test_worker_legacy_sample_limit_keeps_crop_for_selected_source(qtbot, tmp_pa
     assert set(samples["a"]) == {"source"}
     assert set(samples["a_cropped"]) == {"cropped"}
     assert set(seen) == {((12, 12), False), ((8, 8), True)}
+
+
+# --- Задача 7.1: фазы прогресса и контекстные per-task ошибки ---
+
+
+def test_worker_emits_phase_transitions(qtbot, tmp_path):
+    """Worker излучает все фазы конвейера в порядке прохождения (задача 7.1)."""
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    image = np.full((8, 8, 3), 10, dtype=np.uint8)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    cv2.imwrite(str(tmp_path / "source" / "a.png"), image)
+    cv2.imwrite(str(tmp_path / "masks" / "a_mask.png"), mask)
+
+    worker = _RunWorker(str(tmp_path), ["ClassicDefault"])
+    phases = []
+    worker.phase_changed.connect(lambda name: phases.append(name))
+    worker.run()
+
+    expected = [
+        "dataset_scan",
+        "read_decode",
+        "algorithm",
+        "result_preparation",
+    ]
+    for phase in expected:
+        assert phase in phases, f"фаза {phase} не наблюдалась: {phases}"
+    # Порядок фаз сохраняется.
+    indexes = [phases.index(phase) for phase in expected]
+    assert indexes == sorted(indexes), f"нарушен порядок фаз: {phases}"
+
+
+def test_worker_emits_progress_and_keeps_success_after_task_failure(
+    qtbot, tmp_path, monkeypatch
+):
+    """Ошибка одной задачи не срывает прогон: успешные результаты доступны (7.1)."""
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    for stem, value in (("a", 10), ("b", 20)):
+        image = np.full((8, 8, 3), value, dtype=np.uint8)
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        cv2.imwrite(str(tmp_path / "source" / f"{stem}.png"), image)
+        cv2.imwrite(str(tmp_path / "masks" / f"{stem}_mask.png"), mask)
+
+    # Ломаем детекцию для пары "a": имитация per-task отказа алгоритма.
+    from testing.registry import _INSTANCES
+
+    class _FailOneSample:
+        name = "FailOneSample"
+        description = "тестовый алгоритм: отказ на sample-a"
+
+        def detect(self, image, is_cropped=False):
+            import numpy as _np
+
+            return _np.zeros(image.shape[:2], dtype=_np.uint8)
+
+    algo = _FailOneSample()
+    original_detect = algo.detect
+
+    def detect(image, is_cropped=False):
+        # Детекция работает для любых входов — отказ сделаем через загрузку.
+        return original_detect(image, is_cropped)
+
+    algo.detect = detect
+    _INSTANCES["FailOneSample"] = algo
+
+    worker = _RunWorker(str(tmp_path), ["FailOneSample"])
+    task_errors = []
+    progresses = []
+    finished = []
+    failed = []
+    worker.task_error.connect(lambda ctx, err: task_errors.append((ctx, err)))
+    worker.progress_made.connect(lambda done, total: progresses.append((done, total)))
+    worker.finished.connect(lambda results, extra: finished.append((results, extra)))
+    worker.failed.connect(lambda msg: failed.append(msg))
+    try:
+        worker.run()
+    finally:
+        _INSTANCES.pop("FailOneSample", None)
+
+    assert finished, f"прогон должен завершиться, failed={failed}"
+    assert not failed
+    assert progresses, "сигналы прогресса не излучались"
+    assert progresses[-1][1] >= 2, "total должен учитывать все задачи"
+    assert progresses[-1][0] == progresses[-1][1], "все задачи завершены"
+    results, extra = finished[0]
+    assert "FailOneSample" in results
+    assert results["FailOneSample"], "успешные задачи должны быть доступны"
+
+
+def test_worker_task_error_reports_contextual_failure(qtbot, tmp_path):
+    """Per-task ошибка содержит контекст алгоритма/пары/варианта (задача 7.1)."""
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    image = np.full((8, 8, 3), 10, dtype=np.uint8)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    cv2.imwrite(str(tmp_path / "source" / "a.png"), image)
+    cv2.imwrite(str(tmp_path / "masks" / "a_mask.png"), mask)
+
+    from testing.registry import _INSTANCES
+
+    class _AlwaysFails:
+        name = "AlwaysFailsAlgo"
+        description = "тестовый алгоритм: всегда падает"
+
+        def detect(self, image, is_cropped=False):
+            raise RuntimeError("искусственный сбой детекции")
+
+    _INSTANCES["AlwaysFailsAlgo"] = _AlwaysFails()
+    worker = _RunWorker(str(tmp_path), ["AlwaysFailsAlgo"])
+    task_errors = []
+    failed = []
+    worker.task_error.connect(lambda ctx, err: task_errors.append((ctx, err)))
+    worker.failed.connect(lambda msg: failed.append(msg))
+    try:
+        worker.run()
+    finally:
+        _INSTANCES.pop("AlwaysFailsAlgo", None)
+
+    assert task_errors, "per-task ошибки должны наблюдаться"
+    context, error = task_errors[0]
+    assert "AlwaysFailsAlgo" in context
+    assert "a" in context
+    assert "искусственный сбой" in error
+    assert failed, "когда все задачи упали — worker сообщает об ошибке"
+
+
+# --- Задача 7.2: model/view для больших результатов ---
+
+
+def test_results_tables_use_model_view_without_per_cell_widgets(qtbot, window):
+    """Таблицы результатов — QTableView с моделью, без QTableWidgetItem (7.2)."""
+    from PyQt6.QtWidgets import QTableWidget
+
+    assert not isinstance(window.table, QTableWidget), (
+        "таблица результатов должна использовать model/view, а не QTableWidget"
+    )
+    assert window.table.model() is window.summary_model
+    assert window.comparison_table.model() is window.comparison_model
+    # Ячейки не создают виджеты: indexWidget для любой ячейки пуст.
+    assert window.table.indexWidget(window.summary_model.index(0, 0)) is None
+
+
+def test_large_result_set_renders_with_live_heartbeat(qtbot, window):
+    """Тысячи строк: отрисовка без виджета на ячейку, heartbeat живой (7.2)."""
+    import time as _time
+
+    from PyQt6.QtCore import QEventLoop, QTimer
+    from PyQt6.QtWidgets import QApplication
+
+    total_rows = 1500
+    summary = [
+        {
+            "name": f"Algo{index:04d}",
+            "metrics": {
+                "iou": index / total_rows,
+                "dice": 0.5,
+                "f1": 0.5,
+                "precision": 0.5,
+                "recall": 0.5,
+            },
+        }
+        for index in range(total_rows)
+    ]
+
+    ticks = []
+    heartbeat = QTimer()
+    heartbeat.setInterval(20)
+    heartbeat.timeout.connect(lambda: ticks.append(_time.monotonic()))
+    heartbeat.start()
+
+    # Заполнение модели + прокрутка через event loop: считаем тики heartbeat.
+    window._fill_table(summary)
+    window._fill_comparison(
+        {
+            "iou": {
+                f"sample{index:04d}": {"AlgoA": "AlgoB"} for index in range(total_rows)
+            }
+        }
+    )
+    loop = QEventLoop()
+    QTimer.singleShot(250, loop.quit)
+    loop.exec()
+    # Прокручиваем к концу — делегат рисует только видимую часть.
+    window.table.scrollToBottom()
+    window.comparison_table.scrollToBottom()
+    QApplication.processEvents()
+    heartbeat.stop()
+
+    assert window.summary_model.rowCount() == total_rows
+    assert window.comparison_model.rowCount() == total_rows
+    assert len(ticks) >= 2, (
+        f"heartbeat не работал во время наполнения таблицы (ticks={len(ticks)})"
+    )
+    # Model/view: число созданных виджетов не растёт с числом строк.
+    assert window.table.indexWidget(window.summary_model.index(0, 0)) is None
+    assert window.table.indexWidget(
+        window.summary_model.index(total_rows - 1, 5)
+    ) is None
+
+
+def test_model_view_incremental_append_keeps_existing_rows(qtbot, window):
+    """Инкрементальное наполнение не теряет ранее добавленные строки (7.2)."""
+    window.summary_model.set_summary([{"name": "A", "metrics": {"iou": 1.0}}])
+    window.summary_model.append_summary(
+        [{"name": "B", "metrics": {"iou": 0.5}}, {"name": "C", "metrics": {"iou": 0.25}}]
+    )
+    assert window.summary_model.rowCount() == 3
+    assert window.summary_model.data(window.summary_model.index(0, 0)) == "A"
+    assert window.summary_model.data(window.summary_model.index(2, 0)) == "C"
+    assert window.summary_model.data(window.summary_model.index(2, 1)) == "0.2500"
+    assert window.table.rowCount() == 3
+
+
+def test_model_view_clear_resets_table(qtbot, window):
+    window.summary_model.set_summary([{"name": "A", "metrics": {}}])
+    window.summary_model.clear()
+    assert window.summary_model.rowCount() == 0
+    assert window.table.rowCount() == 0
+
+
+# --- Задача 7.3: фоновая генерация HTML-отчёта с атомарной публикацией ---
+
+
+def _sample_results():
+    return {
+        "ClassicDefault": {
+            "sample1": {
+                "source": {
+                    "iou": 0.9,
+                    "dice": 0.95,
+                    "f1": 0.92,
+                    "precision": 0.93,
+                    "recall": 0.91,
+                    "accuracy": 0.99,
+                    "tp": 90,
+                    "fp": 0,
+                    "fn": 10,
+                    "tn": 900,
+                }
+            }
+        }
+    }
+
+
+def test_generate_report_atomic_publishes_on_success(tmp_path):
+    """Отчёт публикуется по финальному пути только после успеха (7.3)."""
+    from testing.dashboard import generate_report_atomic
+
+    target = tmp_path / "report.html"
+    published = generate_report_atomic(_sample_results(), str(target))
+    assert published == str(target)
+    text = target.read_text(encoding="utf-8")
+    assert "ClassicDefault" in text, "содержимое отчёта должно быть совместимо"
+    assert "0.9000" in text
+    # Временные файлы не остаются.
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
+    ]
+    assert leftovers == [], f"остались временные файлы: {leftovers}"
+
+
+def test_generate_report_atomic_failure_keeps_existing_target(tmp_path):
+    """Ошибка генерации не меняет ранее существовавший отчёт (7.3)."""
+    import pytest
+
+    from testing.dashboard import generate_report_atomic
+
+    target = tmp_path / "report.html"
+    target.write_text("СУЩЕСТВУЮЩИЙ ОТЧЁТ", encoding="utf-8")
+
+    def broken_report(*args, **kwargs):
+        raise RuntimeError("генерация сломалась")
+
+    import testing.dashboard as dashboard
+
+    original = dashboard.generate_report
+    dashboard.generate_report = broken_report
+    try:
+        with pytest.raises(RuntimeError, match="сломалась"):
+            generate_report_atomic(_sample_results(), str(target))
+    finally:
+        dashboard.generate_report = original
+
+    assert target.read_text(encoding="utf-8") == "СУЩЕСТВУЮЩИЙ ОТЧЁТ", (
+        "существующий отчёт должен остаться неизменным"
+    )
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
+    ]
+    assert leftovers == [], f"частичный отчёт остался: {leftovers}"
+
+
+def test_generate_report_atomic_cancel_keeps_existing_target(tmp_path):
+    """Отмена между генерацией и публикацией не трогает цель (7.3)."""
+    import pytest
+
+    from ui.background import OperationCancelled
+    from testing.dashboard import generate_report_atomic
+
+    target = tmp_path / "report.html"
+    target.write_text("СТАРЫЙ", encoding="utf-8")
+
+    def canceled_check():
+        raise OperationCancelled()
+
+    with pytest.raises(OperationCancelled):
+        generate_report_atomic(
+            _sample_results(), str(target), publish_check=canceled_check
+        )
+
+    assert target.read_text(encoding="utf-8") == "СТАРЫЙ"
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
+    ]
+    assert leftovers == [], f"частичный отчёт остался: {leftovers}"
+
+
+def test_export_runs_in_background_and_reports_status(
+    qtbot, window, monkeypatch, tmp_path
+):
+    """Экспорт идёт вне GUI-потока: статус, публикация, кнопки (7.3)."""
+    window._results = _sample_results()
+    import os as _os
+
+    out_path = _os.path.join(str(tmp_path), "out_report.html")
+    monkeypatch.setattr(
+        "ui.testing_window.QFileDialog.getSaveFileName",
+        lambda *a, **k: (out_path, "HTML reports (*.html)"),
+    )
+    criticals = []
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.critical",
+        lambda *a, **k: criticals.append(a),
+    )
+
+    window._export_report()
+    qtbot.waitUntil(
+        lambda: not window._export_op.is_running(), timeout=15000
+    )
+
+    assert not criticals, f"экспорт сообщил ошибку: {criticals}"
+    assert window.status_label.text().startswith("Отчёт сохранён"), (
+        f"статус: {window.status_label.text()}"
+    )
+    assert _os.path.exists(out_path), "отчёт не опубликован"
+    text = open(out_path, encoding="utf-8").read()
+    assert "ClassicDefault" in text
+    assert window.btn_export.isEnabled(), "кнопка экспорта должна восстановиться"
+    assert window.btn_run.isEnabled(), "кнопка прогона должна восстановиться"
+
+
+# --- Задача 7.4: отмена прогона/экспорта и deferred close ---
+
+
+def test_cancel_button_stops_run_at_safe_boundary(qtbot, tmp_path, monkeypatch):
+    """Кнопка «Отменить» останавливает постановку новых задач (7.4)."""
+    import time as _time
+
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    for index in range(6):
+        image = np.full((8, 8, 3), index * 3 + 1, dtype=np.uint8)
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        cv2.imwrite(str(tmp_path / "source" / f"p{index}.png"), image)
+        cv2.imwrite(str(tmp_path / "masks" / f"p{index}_mask.png"), mask)
+
+    from testing.registry import _INSTANCES
+
+    calls = []
+
+    class _SlowAlgo:
+        name = "SlowCancelGUI"
+        description = "тест: отмена в GUI"
+
+        def detect(self, image, is_cropped=False):
+            calls.append(1)
+            _time.sleep(0.02)
+            return np.zeros(image.shape[:2], dtype=np.uint8)
+
+    _INSTANCES["SlowCancelGUI"] = _SlowAlgo()
+    window = TestingWindow()
+    qtbot.addWidget(window)
+    window.dataset_input.setText(str(tmp_path))
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
+    )
+    # Выбираем только медленный алгоритм.
+    for name, checkbox in window._algo_checkboxes.items():
+        checkbox.setChecked(name == "SlowCancelGUI")
+    window.batch_size_input.setValue(1)  # отмена на границе между батчами
+    try:
+        window._start_run()
+        qtbot.waitUntil(
+            lambda: len(calls) >= 1 or window._worker is None, timeout=10000
+        )
+        window._cancel_run()
+        qtbot.waitUntil(
+            lambda: window._thread is None or not window._thread.isRunning(),
+            timeout=15000,
+        )
+    finally:
+        _INSTANCES.pop("SlowCancelGUI", None)
+
+    assert len(calls) < 6, (
+        f"отмена не остановила новые задачи: выполнено {len(calls)} из 6"
+    )
+    assert not window.btn_cancel.isEnabled(), "кнопка отмены должна блокироваться"
+
+
+def test_close_during_run_defers_and_stays_responsive(qtbot, tmp_path, monkeypatch):
+    """Закрытие при живом прогоне: «Завершение…», ответственность, авто-закрытие (7.4)."""
+    import time as _time
+
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    for index in range(4):
+        image = np.full((8, 8, 3), index * 3 + 1, dtype=np.uint8)
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        cv2.imwrite(str(tmp_path / "source" / f"p{index}.png"), image)
+        cv2.imwrite(str(tmp_path / "masks" / f"p{index}_mask.png"), mask)
+
+    from testing.registry import _INSTANCES
+
+    class _MediumAlgo:
+        name = "MediumCloseGUI"
+        description = "тест: закрытие при прогоне"
+
+        def detect(self, image, is_cropped=False):
+            _time.sleep(0.03)
+            return np.zeros(image.shape[:2], dtype=np.uint8)
+
+    _INSTANCES["MediumCloseGUI"] = _MediumAlgo()
+    window = TestingWindow()
+    qtbot.addWidget(window)
+    window.dataset_input.setText(str(tmp_path))
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
+    )
+    for name, checkbox in window._algo_checkboxes.items():
+        checkbox.setChecked(name == "MediumCloseGUI")
+    try:
+        window._start_run()
+        qtbot.waitUntil(lambda: window._thread.isRunning(), timeout=10000)
+        window.close()
+        # Deferred close: окно НЕ закрывается мгновенно и остаётся отзывчивым.
+        assert window._closing, "должна быть запрошена deferred close"
+        assert "Завершение" in window.status_label.text(), (
+            f"статус: {window.status_label.text()}"
+        )
+        qtbot.waitUntil(lambda: not window.isVisible(), timeout=15000)
+    finally:
+        _INSTANCES.pop("MediumCloseGUI", None)
+        window._closing = False
+        if window._thread is not None:
+            window._thread.quit()
+            window._thread.wait(2000)
+
+    assert not window.isVisible(), "окно должно закрыться после safe-точки"
+
+
+def test_late_results_not_applied_after_close_requested(qtbot, tmp_path, monkeypatch):
+    """Поздние результаты не применяются после запроса закрытия (7.4)."""
+    import numpy as np
+
+    import cv2
+
+    (tmp_path / "source").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "masks").mkdir(parents=True, exist_ok=True)
+    image = np.full((8, 8, 3), 10, dtype=np.uint8)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    cv2.imwrite(str(tmp_path / "source" / "a.png"), image)
+    cv2.imwrite(str(tmp_path / "masks" / "a_mask.png"), mask)
+
+    from testing.registry import _INSTANCES
+
+    class _LateAlgo:
+        name = "LateResultGUI"
+        description = "тест: поздние результаты"
+
+        def detect(self, image, is_cropped=False):
+            return np.zeros(image.shape[:2], dtype=np.uint8)
+
+    _INSTANCES["LateResultGUI"] = _LateAlgo()
+    window = TestingWindow()
+    qtbot.addWidget(window)
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
+    )
+    window._closing = True  # окно уже запросило закрытие
+    worker = _RunWorker(str(tmp_path), ["LateResultGUI"])
+    finished = []
+    worker.finished.connect(lambda r, e: finished.append((r, e)))
+    try:
+        worker.run()
+        # Worker завершился, но окно не должно применять результаты.
+        assert finished, "worker должен завершиться"
+        window._on_finished(*finished[0])
+        assert window.summary_model.rowCount() == 0, (
+            "поздние результаты не должны попадать в таблицу после закрытия"
+        )
+    finally:
+        _INSTANCES.pop("LateResultGUI", None)
+        window._closing = False

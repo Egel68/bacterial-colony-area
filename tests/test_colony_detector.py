@@ -29,6 +29,53 @@ class TestFilterComponents:
         out = DETECTOR._filter_components(mask, min_size=1)
         assert np.array_equal(out, mask)
 
+    def test_vectorized_lookup_matches_loop_bitwise(self):
+        """Задача 3.2: векторизованная фильтрация эквивалентна старому циклу.
+
+        Референс — прежний алгоритм (повторный проход по меткам).
+        """
+        def loop_filter(mask, min_size):
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+                mask, connectivity=8
+            )
+            filtered_mask = np.zeros_like(mask)
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area >= min_size:
+                    filtered_mask[labels == i] = 255
+            return filtered_mask
+
+        rng = np.random.RandomState(42)
+        for seed_shape, min_size in (
+            ((200, 300), 5),
+            ((500, 500), 50),
+            ((100, 100), 1),
+            ((64, 64), 1000),
+        ):
+            mask = (rng.randint(0, 2, seed_shape, dtype=np.uint8) * 255).astype(
+                np.uint8
+            )
+            # Добавляем крупные структуры для смешанных площадей компонент.
+            cv2.circle(mask, (seed_shape[1] // 3, seed_shape[0] // 3), 30, 255, -1)
+            cv2.rectangle(
+                mask,
+                (seed_shape[1] // 2, seed_shape[0] // 2),
+                (seed_shape[1] // 2 + 45, seed_shape[0] // 2 + 45),
+                255,
+                -1,
+            )
+            reference = loop_filter(mask, min_size)
+            result = DETECTOR._filter_components(mask, min_size)
+            assert np.array_equal(result, reference), (
+                f"маска {seed_shape}, min_size={min_size}: векторизация разошлась "
+                "с эталонным циклом"
+            )
+
+    def test_empty_labels_returns_empty(self):
+        mask = np.zeros((32, 32), dtype=np.uint8)
+        out = DETECTOR._filter_components(mask, min_size=1)
+        assert np.array_equal(out, mask)
+
 
 class TestCountColonies:
     def test_empty(self):

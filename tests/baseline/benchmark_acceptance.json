@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "host_profile": "tests/baseline/host_profile.json",
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.13.14",
+    "opencv": "4.13.0",
+    "onnxruntime": "1.27.0",
+    "numpy": "2.5.0",
+    "visible_cpu_capacity": 6,
+    "cache_condition": "warm-cache; cache was not dropped"
+  },
+  "workload": {
+    "dataset": "datasets/22022540_imported",
+    "sample_ids": ["sp21_img24", "sp21_img41", "sp21_img38", "sp21_img19", "sp21_img37"],
+    "variants": ["source", "cropped"],
+    "algorithms": ["ClassicDefault", "ClassicHighSensitivity", "ClassicSolidFill", "ClassicLowSensitivity"],
+    "tasks": 40,
+    "batch_size": 2,
+    "memory_budget_bytes": 805306368,
+    "paired_order_seconds": {
+      "sequential_then_auto": [82.60375123400081, 256.178240878],
+      "auto_then_sequential": [263.546150664999, 82.08858312600023]
+    }
+  },
+  "modes": {
+    "sequential": {
+      "workers_requested": 1,
+      "effective_policy": {"total_capacity": 6, "algorithm_workers": 1, "decode_workers": 1, "native_threads": 6, "source": "explicit", "requested_workers": 1, "interactive": false},
+      "effective_concurrency": 6,
+      "repetitions": 2,
+      "tasks": 40,
+      "wall_seconds": {"median": 82.34616718000052, "p50": 82.34616718000052, "runs": [82.60375123400081, 82.08858312600023]},
+      "process_cpu_seconds": {"median": 291.635055158, "source": "one independent sequential telemetry run"},
+      "cpu_core_equivalents": {"median": 3.6975, "source": "one independent sequential telemetry run"},
+      "throughput_tasks_per_second": {"median": 0.5071, "source": "one independent sequential telemetry run"},
+      "input_starvation": {"starvation_seconds": 0.0000833, "ratio": 0.000001056, "source": "one independent sequential telemetry run"},
+      "peak_rss_bytes": {"max": 1372545024, "source": "one independent sequential telemetry run"},
+      "latency_stages_seconds": {
+        "file_read": {"count": 20, "median": 0.0015225, "p95": 0.0080129, "total": 0.0539136},
+        "image_decode": {"count": 20, "median": 0.1661247, "p95": 0.2663112, "total": 3.4784871},
+        "detect": {"count": 40, "median": 0.5009049, "p95": 7.5036959, "total": 70.4523273},
+        "input_wait": {"count": 40, "median": 18.6540742, "p95": 58.1778498, "total": 912.516914},
+        "queue_wait": {"count": 40, "median": 2.4594567, "p95": 29.0120167, "total": 250.8518429}
+      },
+      "logical_io": {"file_read_calls": 20, "file_read_bytes": 41751533, "decode_calls": 20, "decode_bytes": 1386138176},
+      "physical_io": {"read_bytes_delta": 2539520, "cold_storage_io": "unmeasured"},
+      "results_sha256": "eccebcc4d4c3350fc6b54a5168076b3fd21f2f1720856ff9ea287e1bcbaeff37"
+    },
+    "conservative_auto": {
+      "workers_requested": null,
+      "effective_policy": {"total_capacity": 6, "algorithm_workers": 6, "decode_workers": 1, "native_threads": 1, "source": "auto", "requested_workers": null, "interactive": false},
+      "effective_concurrency": 6,
+      "repetitions": 2,
+      "tasks": 40,
+      "wall_seconds": {"median": 259.862195771, "p50": 259.862195771, "runs": [256.178240878, 263.546150664999]},
+      "process_cpu_seconds": 1028.859627188,
+      "cpu_core_equivalents": 4.0510,
+      "throughput_tasks_per_second": 0.1575,
+      "input_starvation": {"starvation_seconds": 0.0000573, "ratio": 0.000000226, "source": "one independent auto telemetry run"},
+      "peak_rss_bytes": 2786119680,
+      "latency_stages_seconds": {
+        "file_read": {"count": 20, "median": 0.0014761, "p95": 0.0132062, "total": 0.0799359},
+        "image_decode": {"count": 20, "median": 0.2328902, "p95": 0.5406982, "total": 5.5255202},
+        "detect": {"count": 40, "median": 5.3150232, "p95": 129.3664386, "total": 1013.9343209},
+        "input_wait": {"count": 40, "median": 32.2299263, "p95": 107.9843667, "total": 1632.9265378},
+        "queue_wait": {"count": 40, "median": 0.0008676, "p95": 2.9559180, "total": 28.9309766}
+      },
+      "logical_io": {"file_read_calls": 20, "file_read_bytes": 41751533, "decode_calls": 20, "decode_bytes": 1386138176},
+      "physical_io": {"read_bytes_delta": 0, "cold_storage_io": "unmeasured"},
+      "results_sha256": "eccebcc4d4c3350fc6b54a5168076b3fd21f2f1720856ff9ea287e1bcbaeff37"
+    }
+  },
+  "correctness": {"results_identical": true, "matching_sha256": "eccebcc4d4c3350fc6b54a5168076b3fd21f2f1720856ff9ea287e1bcbaeff37"},
+  "comparison": {
+    "auto_to_sequential_wall_ratio": 3.155,
+    "auto_relative_slowdown_percent": 215.5,
+    "conclusion": "This workload showed no acceleration: automatic six-worker mode was about 3.16x slower than sequential mode, although both policies had six effective CPU concurrency slots. The worker count is not evidence of acceleration."
+  },
+  "limitations": [
+    "Two paired repetitions completed in alternating order; an attempted third-pair/full telemetry run required more than 16 minutes and was stopped.",
+    "Per-mode CPU/RSS/starvation and pipeline-stage telemetry is reported from one independent representative run, not a median across the two paired timing repetitions.",
+    "Cold physical-storage I/O was not measured; process read counters during warm-cache runs do not represent cold device throughput."
+  ]
+}

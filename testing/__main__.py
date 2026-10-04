@@ -11,7 +11,7 @@ from .dashboard import generate_report
 from .dataset import TestDataset
 from .onnx_algorithm import OnnxModelAlgorithm
 from .registry import register_algorithm_instance
-from .runner import run_all, compare_algorithms
+from .runner import run_all_with_comparison
 from .telemetry import TelemetryCollector
 from utils.logging import setup_logging
 
@@ -162,21 +162,24 @@ def main(mode_override: str | None = None):
         output_path=performance_output,
         interval=args.telemetry_interval,
     )
-    all_results = run_all(
+    compare_pair = None
+    if args.compare:
+        a, b = (part.strip() for part in args.compare.split(","))
+        log.info("Comparing '%s' vs '%s'", a, b)
+        compare_pair = (a, b)
+
+    # Прогон и парное сравнение выполняются за один проход: каждая
+    # «алгоритм × sample × variant» детекция вычисляется не более одного раза.
+    all_results, comparison = run_all_with_comparison(
         dataset,
         algorithms=algorithms,
+        compare_pair=compare_pair,
         workers=args.workers,
         use_cache=args.use_cache,
         batch_size=args.batch_size,
         memory_budget=args.memory_budget,
         telemetry=telemetry,
     )
-
-    comparison = None
-    if args.compare:
-        a, b = (part.strip() for part in args.compare.split(","))
-        log.info("Comparing '%s' vs '%s'", a, b)
-        comparison = compare_algorithms(dataset, a, b)
 
     log.info("Generating report...")
     report_started = time.perf_counter()

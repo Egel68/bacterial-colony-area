@@ -1,20 +1,25 @@
+import logging
+import math
 import shutil
 from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint, QSize
-from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PyQt6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen
 
 from analysis.geometry import PetriInfo
 from labeling.session_manager import ensure_session_structure
+from ui.background import BackgroundOperation
 from ui.controllers.labeling_controller import LabelingController
 from ui.responsive import (
     install_application_responsive_sizing,
     set_responsive_stylesheet,
 )
-from utils.image_loader import load_image
+from utils.image_loader import load_image, load_image_worker_safe
+
+log = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -56,10 +61,26 @@ class PaintLabel(QLabel):
         self._fit_scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
-        self._original_pixmap = None
+        self._scale = 1.0
+        self._scaled_size = QSize(0, 0)
+        # Кеш композита для уменьшенных представлений: {масштаб уровня: ndarray}.
+        # Хранит только отображение (1/2 и 1/8 кадра), патчится локально кистью.
+        self._level_cache: dict[float, np.ndarray] = {}
+        self._view_mode = 0
         self.petri_info = None
         self.show_petri_circle = False
-        self.view_mode = 0
+
+    @property
+    def view_mode(self) -> int:
+        return self._view_mode
+
+    @view_mode.setter
+    def view_mode(self, value: int) -> None:
+        value = int(value)
+        if value != self._view_mode:
+            self._view_mode = value
+            self._level_cache.clear()
+            self.update()
 
     def set_image(self, image: np.ndarray, mask: np.ndarray = None):
         self._image = image.copy()
@@ -69,7 +90,17 @@ class PaintLabel(QLabel):
         else:
             self._mask = np.zeros((h, w), dtype=np.uint8)
         self._zoom_factor = 1.0
+        self._level_cache.clear()
         self._render()
+
+    def clear_image(self):
+        """Полный сброс канваса (изображение, маска, кеш отображения)."""
+        self._image = None
+        self._mask = None
+        self._level_cache.clear()
+        self._scaled_size = QSize(0, 0)
+        self.clear()
+        self.update()
 
     def set_petri_info(self, info: Optional[PetriInfo]):
         self.petri_info = info
@@ -82,6 +113,7 @@ class PaintLabel(QLabel):
     def clear_mask(self):
         if self._mask is not None:
             self._mask.fill(0)
+            self._level_cache.clear()
             self._render()
 
     def zoom_reset(self):
@@ -100,34 +132,29 @@ class PaintLabel(QLabel):
     def zoom_percent(self) -> int:
         return int(self._zoom_factor * 100)
 
+    # ------------------------------------------------------------------
+    # Рендеринг: только видимая/повреждённая область (viewport-bounded).
+    # Полноразмерные `_image`/`_mask` — источник истины; события кисти
+    # обновляют локальный dirty rect, а не пересобирают весь overlay.
+    # ------------------------------------------------------------------
+
+    # Уровни кеша отображения (масштабы кадра). Для zoom-out используется
+    # ближайший уровень, не превышающий масштаб отображения, поэтому
+    # масштабирование всегда идёт вниз и остаётся чётким.
+    _LEVEL_SCALES = (0.5, 0.125)
+    # Начиная с какого масштаба отображения композит строится напрямую
+    # из полного разрешения (область ограничена viewport).
+    _FULL_RES_THRESHOLD = 0.5
+
     def _render(self):
-        if self._image is None:
-            return
-
-        if self.view_mode == 1:
-            display = cv2.cvtColor(self._mask, cv2.COLOR_GRAY2BGR)
-        else:
-            display = self._image.copy()
-            green = np.zeros_like(display)
-            green[self._mask > 0] = [0, 255, 0]
-            display = cv2.addWeighted(display, 1.0, green, 0.35, 0)
-
-            if self.show_petri_circle and self.petri_info is not None:
-                center = self.petri_info.center
-                radius = self.petri_info.radius
-                cv2.circle(display, center, radius, (255, 100, 100), 2)
-
-        h, w = display.shape[:2]
-        q_img = QImage(display.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-        self._original_pixmap = QPixmap.fromImage(q_img)
+        """Перерисовать канвас (геометрия + repaint видимой области)."""
         self._update_scaled()
 
     def _update_scaled(self):
-        if self._original_pixmap is None:
+        if self._image is None:
             return
 
-        orig_w = self._original_pixmap.width()
-        orig_h = self._original_pixmap.height()
+        orig_h, orig_w = self._image.shape[:2]
 
         scroll_area = getattr(self, "scroll_area", None)
         viewport_size = (
@@ -145,30 +172,37 @@ class PaintLabel(QLabel):
         new_w = max(1, int(orig_w * current_scale))
         new_h = max(1, int(orig_h * current_scale))
 
-        scaled = self._original_pixmap.scaled(
-            new_w,
-            new_h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.setPixmap(scaled)
+        self._scaled_size = QSize(new_w, new_h)
         self._scale = orig_w / new_w
 
         # Увеличение картинки должно прокручиваться внутри viewport, не
         # передавая её размер в sizeHint родительского окна.
         self.setMinimumSize(self._base_zoom_minimum)
 
-        self._offset_x = (self.width() - scaled.width()) / 2.0
-        self._offset_y = (self.height() - scaled.height()) / 2.0
+        self._offset_x = (self.width() - new_w) / 2.0
+        self._offset_y = (self.height() - new_h) / 2.0
 
         self.updateGeometry()
+        self.update()
+
+    def sizeHint(self):
+        if self._image is not None and not self._scaled_size.isEmpty():
+            return QSize(self._scaled_size)
+        return super().sizeHint()
+
+    def minimumSizeHint(self):
+        # QScrollArea растит виджет по minimumSizeHint (как делал QLabel
+        # с pixmap) — так появляются полосы прокрутки при зуме.
+        if self._image is not None and not self._scaled_size.isEmpty():
+            return QSize(self._scaled_size)
+        return super().minimumSizeHint()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_scaled()
 
     def wheelEvent(self, event):
-        if self._original_pixmap is None:
+        if self._image is None:
             return
         delta = event.angleDelta().y()
         if delta > 0:
@@ -180,6 +214,172 @@ class PaintLabel(QLabel):
         x = int((pos.x() - self._offset_x) * self._scale)
         y = int((pos.y() - self._offset_y) * self._scale)
         return x, y
+
+    def _image_to_widget_rect(self, x0: int, y0: int, x1: int, y1: int):
+        """Прямоугольник изображения -> widget-прямоугольник (с запасом 1px)."""
+        s = self._scale
+        left = int(math.floor(x0 / s + self._offset_x)) - 1
+        top = int(math.floor(y0 / s + self._offset_y)) - 1
+        right = int(math.ceil(x1 / s + self._offset_x)) + 1
+        bottom = int(math.ceil(y1 / s + self._offset_y)) + 1
+        return QRect(QPoint(left, top), QPoint(right, bottom))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._image is None or self._mask is None:
+            return
+        painter = QPainter(self)
+        try:
+            self._paint_widget_rect(painter, event.rect())
+        finally:
+            painter.end()
+
+    def _paint_widget_rect(self, painter: QPainter, rect):
+        """Рисует композит только для заданного widget-прямоугольника."""
+        h, w = self._image.shape[:2]
+        rect = rect.intersected(self.rect())
+        if rect.isEmpty():
+            return
+        s = self._scale  # пикселей изображения на экранный пиксель
+
+        ix0 = max(0, int(math.floor((rect.left() - self._offset_x) * s)) - 1)
+        iy0 = max(0, int(math.floor((rect.top() - self._offset_y) * s)) - 1)
+        ix1 = min(w, int(math.ceil((rect.right() + 1 - self._offset_x) * s)) + 1)
+        iy1 = min(h, int(math.ceil((rect.bottom() + 1 - self._offset_y) * s)) + 1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            return
+
+        display_scale = 1.0 / s  # экранных пикселей на пиксель изображения
+        source, ps, jx0, jy0, jx1, jy1 = self._source_region(
+            ix0, iy0, ix1, iy1, display_scale
+        )
+        # QImage требует смежный буфер: срезы кеша уровней копируются.
+        source = np.ascontiguousarray(source)
+
+        qimage = QImage(
+            source.data,
+            source.shape[1],
+            source.shape[0],
+            3 * source.shape[1],
+            QImage.Format.Format_RGB888,
+        )
+        target = QRectF(
+            jx0 / s + self._offset_x,
+            jy0 / s + self._offset_y,
+            (jx1 - jx0) / s,
+            (jy1 - jy0) / s,
+        )
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawImage(target, qimage)
+
+        # Окружность чашки поверх изображения (как раньше, но в экранных
+        # координатах: толщина 2px исходного кадра, пересчитанная по зуму).
+        if (
+            self.view_mode == 0
+            and self.show_petri_circle
+            and self.petri_info is not None
+        ):
+            info = self.petri_info
+            image_rect = QRectF(
+                self._offset_x,
+                self._offset_y,
+                w / s,
+                h / s,
+            )
+            painter.save()
+            painter.setClipRect(image_rect)
+            painter.setPen(QPen(QColor(100, 100, 255), max(1.0, 2.0 / s)))
+            painter.drawEllipse(
+                QPointF(info.cx / s + self._offset_x, info.cy / s + self._offset_y),
+                info.radius / s,
+                info.radius / s,
+            )
+            painter.restore()
+
+    def _select_level(self, display_scale: float) -> float:
+        """Выбирает масштаб источника: уровень кеша >= масштаба отображения."""
+        if display_scale >= self._FULL_RES_THRESHOLD:
+            return 1.0
+        best = self._LEVEL_SCALES[-1]
+        for level in sorted(self._LEVEL_SCALES, reverse=True):
+            if level >= display_scale:
+                best = level
+                break
+        return best
+
+    def _source_region(self, ix0, iy0, ix1, iy1, display_scale):
+        """Композит области: (массив BGR, масштаб, границы в пикселях кадра)."""
+        ps = self._select_level(display_scale)
+        if ps >= 1.0:
+            return self._composite_region(ix0, iy0, ix1, iy1), 1.0, ix0, iy0, ix1, iy1
+
+        level = self._get_level(ps)
+        lh, lw = level.shape[:2]
+        lx0 = max(0, int(math.floor(ix0 * ps)))
+        ly0 = max(0, int(math.floor(iy0 * ps)))
+        lx1 = min(lw, max(lx0 + 1, int(math.ceil(ix1 * ps))))
+        ly1 = min(lh, max(ly0 + 1, int(math.ceil(iy1 * ps))))
+        return (
+            level[ly0:ly1, lx0:lx1],
+            ps,
+            lx0 / ps,
+            ly0 / ps,
+            lx1 / ps,
+            ly1 / ps,
+        )
+
+    def _composite_region(self, x0, y0, x1, y1) -> np.ndarray:
+        """Композит области полного разрешения (формула как у старого _render)."""
+        if self.view_mode == 1:
+            return cv2.cvtColor(self._mask[y0:y1, x0:x1], cv2.COLOR_GRAY2BGR)
+        region = self._image[y0:y1, x0:x1]
+        green = np.zeros_like(region)
+        green[:, :, 1] = self._mask[y0:y1, x0:x1]
+        return cv2.addWeighted(region, 1.0, green, 0.35, 0)
+
+    def _blend_level(self, image_s: np.ndarray, mask_s: np.ndarray) -> np.ndarray:
+        """Композит уменьшенного представления (маска может быть мягкой)."""
+        if self.view_mode == 1:
+            return cv2.cvtColor(mask_s, cv2.COLOR_GRAY2BGR)
+        green = np.zeros_like(image_s)
+        green[:, :, 1] = mask_s
+        return cv2.addWeighted(image_s, 1.0, green, 0.35, 0)
+
+    def _build_level(self, ps: float) -> np.ndarray:
+        """Строит кеш композита уровня (только при инвалидации/первом показе)."""
+        h, w = self._image.shape[:2]
+        lw = max(1, int(round(w * ps)))
+        lh = max(1, int(round(h * ps)))
+        image_s = cv2.resize(self._image, (lw, lh), interpolation=cv2.INTER_AREA)
+        mask_s = cv2.resize(self._mask, (lw, lh), interpolation=cv2.INTER_AREA)
+        return self._blend_level(image_s, mask_s)
+
+    def _get_level(self, ps: float) -> np.ndarray:
+        level = self._level_cache.get(ps)
+        if level is None:
+            level = self._build_level(ps)
+            self._level_cache[ps] = level
+        return level
+
+    def _patch_levels(self, x0, y0, x1, y1) -> None:
+        """Локально обновляет кеш уровней после изменения маски в bbox."""
+        for ps, level in self._level_cache.items():
+            lh, lw = level.shape[:2]
+            lx0 = max(0, int(math.floor(x0 * ps)))
+            ly0 = max(0, int(math.floor(y0 * ps)))
+            lx1 = min(lw, max(lx0 + 1, int(math.ceil(x1 * ps))))
+            ly1 = min(lh, max(ly0 + 1, int(math.ceil(y1 * ps))))
+            sub_img = cv2.resize(
+                self._image[y0:y1, x0:x1],
+                (lx1 - lx0, ly1 - ly0),
+                interpolation=cv2.INTER_AREA,
+            )
+            sub_mask = cv2.resize(
+                self._mask[y0:y1, x0:x1],
+                (lx1 - lx0, ly1 - ly0),
+                interpolation=cv2.INTER_AREA,
+            )
+            level[ly0:ly1, lx0:lx1] = self._blend_level(sub_img, sub_mask)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton and self._mask is not None:
@@ -202,10 +402,17 @@ class PaintLabel(QLabel):
         r = max(1, self.brush_size // 2)
         value = 255 if self.is_drawing else 0
         cv2.circle(self._mask, (x, y), r, value, -1)
-        self._render()
+        # Локальное обновление отображения: патч кешей + dirty rect.
+        x0, y0 = max(0, x - r - 1), max(0, y - r - 1)
+        x1, y1 = min(w, x + r + 2), min(h, y + r + 2)
+        self._patch_levels(x0, y0, x1, y1)
+        self.update(self._image_to_widget_rect(x0, y0, x1, y1))
 
 
 class LabelingWindow(QMainWindow):
+    _IDLE_STATUS = "Выберите изображение из списка слева"
+    _LIST_BUSY_STATUS = "⏳ Обновление списка файлов…"
+
     def __init__(self, session_dir: Path, parent=None):
         super().__init__(parent)
         self.session_dir = session_dir.resolve()
@@ -218,6 +425,24 @@ class LabelingWindow(QMainWindow):
         self.current_stem = None
         self.current_path = None
         self.mode = "source"
+        # Поколение выбора: устаревшие результаты фоновых загрузок
+        # не должны перезаписывать более новый выбор пользователя.
+        self._selection_generation = 0
+        self._load_operation: Optional[BackgroundOperation] = None
+        # Поколение обновления списка файлов (задача 6.2).
+        self._list_generation = 0
+        self._list_operation: Optional[BackgroundOperation] = None
+        # Фоновые операции поиска чашки и обрезки (задача 6.3).
+        self._detect_operation: Optional[BackgroundOperation] = None
+        self._crop_operation: Optional[BackgroundOperation] = None
+        # Пакетное копирование исходных файлов (задача 6.4).
+        self._copy_operation: Optional[BackgroundOperation] = None
+        # Сохранение маски и атомарный ZIP-экспорт (задача 6.6).
+        self._save_operation: Optional[BackgroundOperation] = None
+        self._export_operation: Optional[BackgroundOperation] = None
+        # Deferred close (задача 6.7): окно закрывается после safe-точки.
+        self._closing = False
+        self._pending_closes = 0
         self.petri_info = None
         self.controller = LabelingController()
         self.paint_label = PaintLabel()
@@ -291,7 +516,7 @@ class LabelingWindow(QMainWindow):
         self.btn_refresh.setStyleSheet(
             "background-color: #45475a; font-size: 12px; padding: 6px;"
         )
-        self.btn_refresh.clicked.connect(self._load_file_list)
+        self.btn_refresh.clicked.connect(lambda: self._load_file_list())
         vl.addWidget(self.btn_refresh)
 
         self.btn_add_images = QPushButton("📂 Добавить изображения")
@@ -587,6 +812,8 @@ class LabelingWindow(QMainWindow):
         self.path_label.setText(f"📁 {working}")
 
     def _on_add_images(self):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Выберите изображения для разметки",
@@ -595,14 +822,65 @@ class LabelingWindow(QMainWindow):
         )
         if not files:
             return
-        copied = 0
         dst_dir = self.session_dir / "source"
         dst_dir.mkdir(parents=True, exist_ok=True)
-        for src in map(Path, files):
-            dst = dst_dir / src.name
+
+        if self._copy_operation is not None and self._copy_operation.is_running():
+            return  # предыдущее копирование ещё выполняется
+
+        self.status_label.setText(f"⏳ Копирование изображений: 0 / {len(files)}")
+        generation = self._selection_generation
+        operation = BackgroundOperation(
+            self._copy_work, generation=generation, parent=self
+        )
+        operation.progress_changed.connect(self._on_copy_progress)
+        operation.result_ready.connect(self._on_copy_finished)
+        operation.error_raised.connect(self._on_copy_failed)
+        operation.cancellation_confirmed.connect(self._on_copy_cancelled)
+        self._copy_operation = operation
+        operation.start(files=list(files), dst_dir=str(dst_dir))
+
+    def _copy_work(self, ctx, files, dst_dir: str):
+        """Worker: пакетное копирование исходных файлов (shutil.copy2)."""
+        total = len(files)
+        copied = 0
+        for index, src in enumerate(map(Path, files), start=1):
+            ctx.checkpoint()  # отмена между файлами
+            ctx.status(f"копирование {src.name}")
+            dst = Path(dst_dir) / src.name
+            # Семантика перезаписи при совпадении имён сохраняется (copy2).
             shutil.copy2(str(src), str(dst))
             copied += 1
-        self.status_label.setText(f"📂 Скопировано изображений: {copied}")
+            ctx.progress(index, total)
+        return {"copied": copied, "total": total}
+
+    def _on_copy_progress(self, completed: int, total: int):
+        if total > 0:
+            self.status_label.setText(
+                f"⏳ Копирование изображений: {completed} / {total}"
+            )
+
+    def _on_copy_finished(self, result, generation: int):
+        copied = result["copied"]
+        if generation == self._selection_generation:
+            self.status_label.setText(f"📂 Скопировано изображений: {copied}")
+        self._load_file_list()
+
+    def _on_copy_failed(self, message: str, generation: int):
+        if generation == self._selection_generation:
+            self.status_label.setText("❌ Ошибка копирования")
+        QMessageBox.warning(
+            self,
+            "Ошибка копирования",
+            f"Копирование прервано:\n{message}\n\n"
+            "Уже скопированные файлы сохранены.",
+        )
+        # Частично скопированные файлы должны быть видны в списке.
+        self._load_file_list()
+
+    def _on_copy_cancelled(self, generation: int):
+        if generation == self._selection_generation:
+            self.status_label.setText("⏹ Копирование отменено")
         self._load_file_list()
 
     def _on_mode_changed(self, index: int):
@@ -616,31 +894,155 @@ class LabelingWindow(QMainWindow):
         self._clear_image()
         self._load_file_list()
 
-    def _clear_image(self):
-        self.paint_label._image = None
-        self.paint_label._mask = None
-        self.paint_label._original_pixmap = None
-        self.paint_label.clear()
-        self.status_label.setText("Выберите изображение из списка слева")
+    def _operations(self) -> list:
+        return [
+            self._load_operation,
+            self._list_operation,
+            self._detect_operation,
+            self._crop_operation,
+            self._copy_operation,
+            self._save_operation,
+            self._export_operation,
+        ]
 
-    def _load_file_list(self):
-        self.file_list.clear()
-        d = self._get_current_dir()
-        for f in self.controller.list_image_files(d):
-            item = QListWidgetItem(f.name)
-            item.setData(Qt.ItemDataRole.UserRole, str(f))
-            self.file_list.addItem(item)
+    def closeEvent(self, event):
+        """Deferred close: окно закрывается после safe-точки операций (6.7)."""
+        running = [
+            op for op in self._operations() if op is not None and op.is_running()
+        ]
+        if not running:
+            super().closeEvent(event)
+            return
+        event.ignore()
+        if self._closing:
+            return  # уже ждём безопасной точки
+        self._closing = True
+        self._pending_closes = len(running)
+        self.status_label.setText(
+            "⏳ Завершение… Окно закроется после завершения операций."
+        )
+        for operation in running:
+            # Кооперативная отмена между safe-точками; непрерываемый
+            # native-вызов продолжит работу и не блокирует event loop.
+            operation.cancel()
+            operation.close_reached.connect(self._on_operation_close_reached)
+            operation.request_close()
+
+    def _on_operation_close_reached(self):
+        self._pending_closes -= 1
+        if self._pending_closes <= 0:
+            self._closing = False
+            self.close()
+
+    def _clear_image(self):
+        # Смена файла/режима: устаревшие результаты фоновых операций
+        # должны отбрасываться по номеру поколения.
+        self._selection_generation += 1
+        self.paint_label.clear_image()
+        self.status_label.setText(self._IDLE_STATUS)
+
+    def _load_file_list(self, select_name: str | None = None):
+        """Обновляет список файлов сессии вне GUI-потока (задача 6.2).
+
+        `select_name` — имя файла для автовыбора после завершения обновления
+        (используется обрезкой для перехода к созданному файлу).
+        """
+        if self._closing:
+            return  # закрытие: новая работа не начинается
+        self._list_generation += 1
+        generation = self._list_generation
+        directory = self._get_current_dir()
         self._update_path_label()
 
-    def _on_file_selected(self, item: QListWidgetItem):
-        path = Path(item.data(Qt.ItemDataRole.UserRole))
-        try:
-            image_rgb = self.controller.load_image_rgb(str(path))
-        except ValueError:
-            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить {path.name}")
-            return
+        if self._list_operation is not None and self._list_operation.is_running():
+            self._list_operation.cancel()
+        if self.current_stem is None and self.status_label.text() in (
+            self._IDLE_STATUS,
+            self._LIST_BUSY_STATUS,
+        ):
+            self.status_label.setText(self._LIST_BUSY_STATUS)
 
-        self.current_stem = path.stem
+        operation = BackgroundOperation(
+            self._list_files_work, generation=generation, parent=self
+        )
+        operation.result_ready.connect(
+            lambda result, gen: self._on_file_list_loaded(result, gen, select_name)
+        )
+        operation.error_raised.connect(self._on_file_list_failed)
+        self._list_operation = operation
+        operation.start(directory=str(directory))
+
+    def _list_files_work(self, ctx, directory: str):
+        """Worker: перечисление и сортировка файлов сессии."""
+        ctx.status("обновление списка файлов")
+        files = self.controller.list_image_files(Path(directory))
+        return [str(f) for f in files]
+
+    def _on_file_list_loaded(self, result, generation: int, select_name=None):
+        if generation != self._list_generation:
+            return  # устаревшее обновление списка
+        self.file_list.clear()
+        selected_item = None
+        for name in result:
+            item = QListWidgetItem(Path(name).name)
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self.file_list.addItem(item)
+            if select_name is not None and item.text() == select_name:
+                selected_item = item
+        if self.current_stem is None and self.status_label.text() == (
+            self._LIST_BUSY_STATUS
+        ):
+            self.status_label.setText(self._IDLE_STATUS)
+        if selected_item is not None:
+            self.file_list.setCurrentItem(selected_item)
+            self._on_file_selected(selected_item)
+
+    def _on_file_list_failed(self, message: str, generation: int):
+        if generation != self._list_generation:
+            return
+        self.status_label.setText("❌ Не удалось обновить список файлов")
+        log.warning("Не удалось обновить список файлов: %s", message)
+
+    def _on_file_selected(self, item: QListWidgetItem):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
+        path = Path(item.data(Qt.ItemDataRole.UserRole))
+        self._selection_generation += 1
+        generation = self._selection_generation
+
+        if self._load_operation is not None and self._load_operation.is_running():
+            self._load_operation.cancel()
+
+        mask_path = self._get_mask_dir() / f"{path.stem}_mask.png"
+        self.status_label.setText(f"⏳ Загрузка {path.name}…")
+
+        operation = BackgroundOperation(
+            self._load_image_work, generation=generation, parent=self
+        )
+        operation.result_ready.connect(self._on_image_loaded)
+        operation.error_raised.connect(self._on_image_load_failed)
+        self._load_operation = operation
+        operation.start(path=str(path), mask_path=str(mask_path), stem=path.stem)
+
+    def _load_image_work(self, ctx, path: str, mask_path: str, stem: str):
+        """Worker: декодирование изображения и маски вне GUI-потока."""
+        ctx.status("декодирование изображения")
+        image_bgr = load_image_worker_safe(path)
+        ctx.checkpoint()
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        ctx.status("декодирование маски")
+        mask = self.controller.load_mask(Path(mask_path), image_rgb.shape[:2])
+        return {"image": image_rgb, "mask": mask, "path": path, "stem": stem}
+
+    def _on_image_loaded(self, result, generation: int):
+        if generation != self._selection_generation:
+            return  # устаревший результат: выбор уже заменён
+
+        image_rgb = result["image"]
+        mask = result["mask"]
+        path = Path(result["path"])
+
+        self.current_stem = result["stem"]
         self.current_path = path
         self.petri_info = None
         self.paint_label.petri_info = None
@@ -651,9 +1053,6 @@ class LabelingWindow(QMainWindow):
             self.spin_cy.setValue(0)
             self.spin_radius.setValue(0)
 
-        mask_dir = self._get_mask_dir()
-        mask_path = mask_dir / f"{self.current_stem}_mask.png"
-        mask = self.controller.load_mask(mask_path, image_rgb.shape[:2])
         if mask is not None:
             self.status_label.setText(f"📷 {path.name} (маска загружена)")
         else:
@@ -664,6 +1063,28 @@ class LabelingWindow(QMainWindow):
 
         if self.mode == "source":
             self._on_auto_detect()
+
+    def _on_image_load_failed(self, message: str, generation: int):
+        if generation != self._selection_generation:
+            return
+        self.status_label.setText("❌ Ошибка загрузки")
+        QMessageBox.warning(
+            self,
+            "Ошибка",
+            f"Не удалось загрузить изображение:\n{message}",
+        )
+
+    def _current_image_bgr(self) -> Optional[np.ndarray]:
+        """Декодированный оригинал текущего изображения в BGR.
+
+        Переиспользует уже декодированный кадр канваса (RGB) вместо
+        повторного чтения исходного файла; fallback — чтение файла.
+        """
+        if self.paint_label._image is not None:
+            return cv2.cvtColor(self.paint_label._image, cv2.COLOR_RGB2BGR)
+        if self.current_path is not None:
+            return load_image(str(self.current_path))
+        return None
 
     def _on_spinner_changed(self):
         if self.mode != "source" or self.current_stem is None:
@@ -687,18 +1108,44 @@ class LabelingWindow(QMainWindow):
         self.paint_label._render()
 
     def _on_auto_detect(self):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
         if self.current_path is None:
             return
         try:
-            image_bgr = load_image(str(self.current_path))
+            image_bgr = self._current_image_bgr()
         except ValueError:
             QMessageBox.warning(
                 self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
             )
             return
+        if image_bgr is None:
+            QMessageBox.warning(
+                self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
+            )
+            return
 
-        self.status_label.setText("Поиск чашки Петри...")
-        info = self.controller.detect_petri(image_bgr)
+        if self._detect_operation is not None and self._detect_operation.is_running():
+            return  # предыдущий поиск ещё выполняется
+
+        self.status_label.setText("🔍 Поиск чашки Петри…")
+        generation = self._selection_generation
+        operation = BackgroundOperation(
+            self._detect_work, generation=generation, parent=self
+        )
+        operation.result_ready.connect(self._on_detect_finished)
+        operation.error_raised.connect(self._on_detect_failed)
+        self._detect_operation = operation
+        operation.start(image_bgr=image_bgr)
+
+    def _detect_work(self, ctx, image_bgr):
+        """Worker: автоматический поиск чашки Петри (вне GUI-потока)."""
+        ctx.status("поиск чашки Петри")
+        return self.controller.detect_petri(image_bgr)
+
+    def _on_detect_finished(self, info, generation: int):
+        if generation != self._selection_generation:
+            return  # устаревший результат: выбор уже заменён
         if info is None:
             self.status_label.setText("❌ Чашка не найдена. Настройте вручную.")
             return
@@ -722,7 +1169,17 @@ class LabelingWindow(QMainWindow):
             f"✅ Чашка найдена: центр ({info.cx}, {info.cy}), радиус {info.radius} px"
         )
 
+    def _on_detect_failed(self, message: str, generation: int):
+        if generation != self._selection_generation:
+            return
+        self.status_label.setText("❌ Ошибка поиска чашки")
+        QMessageBox.warning(
+            self, "Ошибка", f"Не удалось выполнить поиск чашки:\n{message}"
+        )
+
     def _on_crop(self):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
         if self.current_path is None:
             QMessageBox.information(self, "Обрезка", "Сначала выберите изображение.")
             return
@@ -733,19 +1190,55 @@ class LabelingWindow(QMainWindow):
             return
 
         try:
-            image_bgr = load_image(str(self.current_path))
+            image_bgr = self._current_image_bgr()
         except ValueError:
             QMessageBox.warning(
                 self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
             )
             return
+        if image_bgr is None:
+            QMessageBox.warning(
+                self, "Ошибка", f"Не удалось загрузить {self.current_path.name}"
+            )
+            return
 
-        cropped = self.controller.crop_by_petri(image_bgr, self.petri_info)
+        if self._crop_operation is not None and self._crop_operation.is_running():
+            return  # предыдущая обрезка ещё выполняется
 
         out_name = f"{self.current_stem}_cropped.png"
         self.cropped_dir.mkdir(parents=True, exist_ok=True)
         out_path = self.cropped_dir / out_name
-        self.controller.save_mask(cropped, out_path)
+
+        self.status_label.setText("✂️ Обрезка по чашке…")
+        generation = self._selection_generation
+        operation = BackgroundOperation(
+            self._crop_work, generation=generation, parent=self
+        )
+        operation.result_ready.connect(self._on_crop_finished)
+        operation.error_raised.connect(self._on_crop_failed)
+        self._crop_operation = operation
+        operation.start(
+            image_bgr=image_bgr,
+            petri_info=self.petri_info,
+            out_path=str(out_path),
+            out_name=out_name,
+        )
+
+    def _crop_work(self, ctx, image_bgr, petri_info, out_path: str, out_name: str):
+        """Worker: обрезка по чашке и запись файла (вне GUI-потока)."""
+        ctx.status("обрезка изображения")
+        cropped = self.controller.crop_by_petri(image_bgr, petri_info)
+        ctx.checkpoint()  # файл не пишется после отмены
+        ctx.status("запись обрезка")
+        self.controller.save_mask(cropped, Path(out_path))
+        return {"out_name": out_name}
+
+    def _on_crop_finished(self, result, generation: int):
+        out_name = result["out_name"]
+        if generation != self._selection_generation:
+            # Выбор уже заменён: файл создан, но навигацию не навязываем.
+            self._load_file_list()
+            return
 
         self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentIndex(1)
@@ -757,14 +1250,7 @@ class LabelingWindow(QMainWindow):
         self.petri_info = None
         self.paint_label.petri_info = None
 
-        self._load_file_list()
-
-        for i in range(self.file_list.count()):
-            item = self.file_list.item(i)
-            if item.text() == out_name:
-                self.file_list.setCurrentItem(item)
-                self._on_file_selected(item)
-                break
+        self._load_file_list(select_name=out_name)
 
         QMessageBox.information(
             self,
@@ -773,7 +1259,13 @@ class LabelingWindow(QMainWindow):
             f"Теперь можно размечать маску на обрезанном изображении.",
         )
 
+    def _on_crop_failed(self, message: str, generation: int):
+        self.status_label.setText("❌ Ошибка обрезки")
+        QMessageBox.warning(self, "Ошибка", f"Не удалось выполнить обрезку:\n{message}")
+
     def _on_export_zip(self):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
         default_name = f"{self.session_dir.name}.zip"
         zip_path_str, _ = QFileDialog.getSaveFileName(
             self,
@@ -784,12 +1276,70 @@ class LabelingWindow(QMainWindow):
         if not zip_path_str:
             return
         zip_path = Path(zip_path_str)
-        self.controller.export_session_to_zip(self.session_dir, zip_path)
-        QMessageBox.information(
-            self, "Экспорт завершён", f"Архив сохранён:\n{zip_path}"
+        if self._export_operation is not None and self._export_operation.is_running():
+            return  # предыдущий экспорт ещё выполняется
+
+        self.status_label.setText("📦 Экспорт ZIP…")
+        operation = BackgroundOperation(
+            self._export_zip_work,
+            generation=self._selection_generation,
+            parent=self,
+        )
+        operation.progress_changed.connect(self._on_export_progress)
+        operation.result_ready.connect(self._on_export_finished)
+        operation.error_raised.connect(self._on_export_failed)
+        operation.cancellation_confirmed.connect(self._on_export_cancelled)
+        self._export_operation = operation
+        operation.start(
+            session_dir=str(self.session_dir), final_path=str(zip_path)
         )
 
+    def _export_zip_work(self, ctx, session_dir: str, final_path: str):
+        """Worker: ZIP через временный файл, публикация только после успеха.
+
+        Отменённый или ошибочный экспорт не трогает ранее существовавший
+        файл по целевому пути и не оставляет частичный архив под именем.
+        """
+        final = Path(final_path)
+        tmp = final.parent / f".{final.name}.partial"
+        try:
+            self.controller.export_session_to_zip(
+                Path(session_dir),
+                tmp,
+                checkpoint=ctx.checkpoint,
+                progress=lambda done: ctx.progress(done),
+            )
+            ctx.checkpoint()  # отмена до публикации не изменяет целевой файл
+            tmp.replace(final)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return {"final_path": str(final)}
+
+    def _on_export_progress(self, completed: int, total: int):
+        self.status_label.setText(f"📦 Экспорт ZIP: файлов {completed}")
+
+    def _on_export_finished(self, result, generation: int):
+        final = result["final_path"]
+        QMessageBox.information(
+            self, "Экспорт завершён", f"Архив сохранён:\n{final}"
+        )
+        self.status_label.setText("✅ Экспорт ZIP завершён")
+
+    def _on_export_failed(self, message: str, generation: int):
+        self.status_label.setText("❌ Ошибка экспорта")
+        QMessageBox.warning(
+            self,
+            "Ошибка экспорта",
+            f"Экспорт не завершён:\n{message}\n\nЦелевой файл не изменён.",
+        )
+
+    def _on_export_cancelled(self, generation: int):
+        self.status_label.setText("⏹ Экспорт отменён")
+
     def _on_save(self):
+        if self._closing:
+            return  # закрытие: новая работа не начинается
         if self.current_stem is None or self.paint_label._mask is None:
             QMessageBox.information(
                 self, "Сохранение", "Нет активного изображения для сохранения."
@@ -806,8 +1356,34 @@ class LabelingWindow(QMainWindow):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self.controller.save_mask(self.paint_label._mask, mask_path)
-        QMessageBox.information(
-            self, "Сохранено", f"Маска сохранена:\n{mask_path.name}"
+        if self._save_operation is not None and self._save_operation.is_running():
+            return  # предыдущее сохранение ещё выполняется
+
+        self.status_label.setText("💾 Сохранение маски…")
+        generation = self._selection_generation
+        operation = BackgroundOperation(
+            self._save_mask_work, generation=generation, parent=self
         )
-        self.status_label.setText(f"✅ Маска сохранена: {mask_path.name}")
+        operation.result_ready.connect(self._on_save_finished)
+        operation.error_raised.connect(self._on_save_failed)
+        self._save_operation = operation
+        # Маска передаётся неизменяемым snapshot'ом на момент действия
+        # пользователя (см. ui.background.snapshot).
+        operation.start(mask=self.paint_label._mask, path=str(mask_path))
+
+    def _save_mask_work(self, ctx, mask, path: str):
+        """Worker: запись маски из неизменяемого snapshot'а."""
+        ctx.status("запись маски")
+        self.controller.save_mask(mask, Path(path))
+        return {"name": Path(path).name}
+
+    def _on_save_finished(self, result, generation: int):
+        name = result["name"]
+        QMessageBox.information(self, "Сохранено", f"Маска сохранена:\n{name}")
+        self.status_label.setText(f"✅ Маска сохранена: {name}")
+
+    def _on_save_failed(self, message: str, generation: int):
+        self.status_label.setText("❌ Ошибка сохранения маски")
+        QMessageBox.warning(
+            self, "Ошибка", f"Не удалось сохранить маску:\n{message}"
+        )

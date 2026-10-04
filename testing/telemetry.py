@@ -45,7 +45,24 @@ class TelemetryCollector:
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
         self._latencies: dict[str, list[float]] = defaultdict(list)
+        self._logical_io: dict[str, dict[str, Any]] = {}
+        self._worker_limits: dict[str, Any] = {
+            "outer_workers": None,
+            "native_threads": None,
+            "source": "unreported",
+        }
+        self._cpu_availability: dict[str, Any] = {
+            "logical_count": None,
+            "physical_count": None,
+            "affinity": None,
+            "quota": None,
+        }
         self._tasks = defaultdict(int)
+        self._input_starvation: dict[str, Any] = {
+            "starvation_seconds": None,
+            "active_seconds": None,
+            "ratio": None,
+        }
         self._work = defaultdict(int)
         self._cache = defaultdict(int)
         self._serial_calls = 0
@@ -142,6 +159,65 @@ class TelemetryCollector:
         with self._lock:
             self._latencies[stage].append(max(0.0, duration))
 
+    def record_logical_io(
+        self, operation: str, byte_count: int, **extra: Any
+    ) -> None:
+        """Логическое I/O-событие (задача 2.1): чтение/декодирование.
+
+        Отдельно от физических счётчиков ОС: ноль физических read-bytes
+        может означать page cache, а не отсутствие логического чтения.
+        """
+        if not self.enabled:
+            return
+        with self._lock:
+            self._logical_io.setdefault(operation, {"bytes": 0, "calls": 0, "extra": {}})
+            entry = self._logical_io[operation]
+            entry["bytes"] += max(0, int(byte_count))
+            entry["calls"] += 1
+            entry["extra"].update(extra)
+
+    def record_worker_limits(
+        self,
+        outer_workers: int | None,
+        native_threads: int | None = None,
+        source: str = "auto",
+    ) -> None:
+        """Фиксирует эффективные лимиты параллелизма (задача 2.3).
+
+        `outer_workers` — фактическое число внешних worker-потоков,
+        `native_threads` — внутренняя параллельность OpenCV/ONNX Runtime
+        (или None, если не определена/не контролируется).
+        """
+        if not self.enabled:
+            return
+        with self._lock:
+            self._worker_limits = {
+                "outer_workers": outer_workers,
+                "native_threads": native_threads,
+                "source": source,
+            }
+
+    def record_cpu_availability(
+        self,
+        logical_count: int | None = None,
+        physical_count: int | None = None,
+        affinity: list | None = None,
+        quota: dict | None = None,
+    ) -> None:
+        """Фиксирует доступность CPU (задача 2.3).
+
+        Недоступные поля остаются None — неизвестное не подменяется нулём.
+        """
+        if not self.enabled:
+            return
+        with self._lock:
+            self._cpu_availability = {
+                "logical_count": logical_count,
+                "physical_count": physical_count,
+                "affinity": affinity,
+                "quota": quota,
+            }
+
     def record_task(
         self,
         *,
@@ -185,6 +261,25 @@ class TelemetryCollector:
     def record_serial_call(self) -> None:
         if self.enabled:
             self._serial_calls += 1
+
+    def record_input_starvation(
+        self,
+        *,
+        starvation_seconds: float,
+        active_seconds: float,
+        ratio: float,
+    ) -> None:
+        """Метрика input-starvation конвейера (задача 2.7).
+
+        `ratio` — доля worker-slot-seconds, в течение которых compute slot
+        готов принять работу, но очередь подготовленных входов пуста.
+        """
+        with self._lock:
+            self._input_starvation = {
+                "starvation_seconds": starvation_seconds,
+                "active_seconds": active_seconds,
+                "ratio": ratio,
+            }
 
     def record_error(self, message: str) -> None:
         if self.enabled:
@@ -259,22 +354,48 @@ class TelemetryCollector:
             "variants_per_second": throughput.get("variants", 0.0),
             "algorithm_calls_per_second": throughput.get("algorithm_calls", 0.0),
         }
+        logical_io = {
+            operation: dict(entry) for operation, entry in self._logical_io.items()
+        }
+        # Условия измерения (задача 2.1/1.3): явно помечаем, что физические
+        # I/O-счётчики ОС нулевые/недоступные — это не отсутствие чтения.
+        io_condition = {
+            "physical_counters_available": resources["capabilities"].get(
+                "process_io_counters", False
+            ),
+            "physical_read_bytes_delta": io_delta.get("read_bytes"),
+            "note": (
+                "Логическое чтение/декодирование измерено отдельно "
+                "(logical_io). Ноль физических read-bytes может означать "
+                "page cache (warm cache), а не отсутствие чтения."
+            ),
+        }
         return {
             "duration_seconds": elapsed,
             "resources": {
                 "cpu": cpu,
                 "process_cpu_time": process_cpu_time,
+                # CPU core-equivalents: отношение process CPU-time к wall-time
+                # (задача 2.3). 1.0 означает одно полностью занятое ядро.
+                "cpu_core_equivalents": (
+                    process_cpu_time / elapsed if elapsed > 0 else None
+                ),
                 "memory": {"rss": rss, "peak_rss": self._peak_rss},
                 "io": io_delta,
                 "io_rates": io_rates,
                 "rates": io_rates_explicit,
                 "capabilities": resources["capabilities"],
             },
+            "cpu_availability": dict(self._cpu_availability),
+            "worker_limits": dict(self._worker_limits),
+            "input_starvation": dict(self._input_starvation),
             "latency": latency,
             "tasks": dict(self._tasks),
             "work": dict(self._work),
             "throughput": throughput,
             "throughput_rates": throughput_explicit,
+            "logical_io": logical_io,
+            "io_condition": io_condition,
             "cache": dict(self._cache),
             "serial_lane_calls": self._serial_calls,
             "errors": list(self._errors),
