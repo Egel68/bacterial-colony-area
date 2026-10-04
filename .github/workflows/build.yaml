@@ -120,7 +120,16 @@ jobs:
           uv run python -m pytest tests/ \
             --cov=analysis --cov=utils --cov=testing \
             --cov-report=term --cov-report=xml \
+            --junitxml=pytest-results.xml \
             -v --tb=short -m "not slow and not gui"
+
+      - name: Upload Linux pytest report
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-pytest-report
+          path: pytest-results.xml
+          if-no-files-found: ignore
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
