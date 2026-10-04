@@ -7,6 +7,7 @@
 
 import time
 import zipfile
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -34,9 +35,7 @@ def window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         lw.QMessageBox, "information", staticmethod(lambda *a, **k: None)
     )
-    monkeypatch.setattr(
-        lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
         lw.QMessageBox,
         "question",
@@ -67,8 +66,10 @@ def test_mask_saved_from_immutable_snapshot(qtbot, window):
     saved_path = window.masks_dir / "sample_mask.png"
     qtbot.waitUntil(lambda: saved_path.exists(), timeout=5000)
     qtbot.waitUntil(
-        lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         timeout=5000,
     )
     saved = cv2.imread(str(saved_path), cv2.IMREAD_GRAYSCALE)
@@ -80,12 +81,8 @@ def test_mask_saved_from_immutable_snapshot(qtbot, window):
 def test_large_mask_save_keeps_heartbeat(qtbot, window):
     rng = np.random.RandomState(7)
     size = 6000  # «большая» маска: кодирование PNG занимает сотни мс
-    big_mask = (rng.randint(0, 2, (size, size), dtype=np.uint8) * 255).astype(
-        np.uint8
-    )
-    window.paint_label.set_image(
-        np.zeros((size, size, 3), dtype=np.uint8), big_mask
-    )
+    big_mask = (rng.randint(0, 2, (size, size), dtype=np.uint8) * 255).astype(np.uint8)
+    window.paint_label.set_image(np.zeros((size, size, 3), dtype=np.uint8), big_mask)
     window.current_stem = "big"
     window.current_path = window.source_dir / "big.png"
 
@@ -97,8 +94,10 @@ def test_large_mask_save_keeps_heartbeat(qtbot, window):
 
     window._on_save()
     qtbot.waitUntil(
-        lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         timeout=30000,
     )
     heartbeat.stop()
@@ -128,8 +127,10 @@ def test_zip_export_publishes_only_after_success(qtbot, window, tmp_path, monkey
 
     window._on_export_zip()
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and not window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and not window._export_operation.is_running()
+        ),
         timeout=10000,
     )
     assert target.exists(), "ZIP не опубликован после успеха"
@@ -160,8 +161,10 @@ def test_zip_failure_preserves_previous_target(qtbot, window, tmp_path, monkeypa
     monkeypatch.setattr(window.controller, "export_session_to_zip", broken_export)
     window._on_export_zip()
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and not window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and not window._export_operation.is_running()
+        ),
         timeout=10000,
     )
     assert target.read_bytes() == b"previous-archive-content", (
@@ -170,9 +173,7 @@ def test_zip_failure_preserves_previous_target(qtbot, window, tmp_path, monkeypa
     assert not (target.parent / f".{target.name}.partial").exists(), (
         "частичный архив оставлен под именем"
     )
-    qtbot.waitUntil(
-        lambda: "Ошибка" in window.status_label.text(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: "Ошибка" in window.status_label.text(), timeout=5000)
 
 
 def test_zip_cancel_preserves_previous_target(qtbot, window, tmp_path, monkeypatch):
@@ -200,18 +201,16 @@ def test_zip_cancel_preserves_previous_target(qtbot, window, tmp_path, monkeypat
     monkeypatch.setattr(window.controller, "export_session_to_zip", slow_export)
     window._on_export_zip()
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and window._export_operation.is_running()
+        ),
         timeout=5000,
     )
     qtbot.wait(150)
     window._export_operation.cancel()
-    qtbot.waitUntil(
-        lambda: not window._export_operation.is_running(), timeout=5000
-    )
-    qtbot.waitUntil(
-        lambda: "отменён" in window.status_label.text(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: not window._export_operation.is_running(), timeout=5000)
+    qtbot.waitUntil(lambda: "отменён" in window.status_label.text(), timeout=5000)
     assert target.read_bytes() == b"previous-archive-content", (
         "целевой файл изменён при отмене экспорта"
     )
@@ -232,8 +231,10 @@ def test_zip_success_replaces_existing_target(qtbot, window, tmp_path, monkeypat
     )
     window._on_export_zip()
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and not window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and not window._export_operation.is_running()
+        ),
         timeout=10000,
     )
     assert zipfile.is_zipfile(target), "успешный экспорт не заменил старый файл"

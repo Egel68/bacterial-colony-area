@@ -19,10 +19,8 @@ from .cache import PredictionCache
 from .metrics import compute_segmentation_metrics
 from .pipeline_observer import (
     PHASE_ALGORITHM,
-    PHASE_COMPARISON,
     PHASE_DATASET_SCAN,
     PHASE_READ_DECODE,
-    PHASE_RESULT_PREPARATION,
     PipelineObserver,
 )
 from .registry import get_algorithm, list_algorithms
@@ -497,9 +495,7 @@ def _effective_workers(
 
         available_memory = psutil.virtual_memory().available
         if memory_budget is not None:
-            visible = min(
-                visible, max(1, available_memory // max(memory_budget, 1))
-            )
+            visible = min(visible, max(1, available_memory // max(memory_budget, 1)))
     except (ImportError, OSError, AttributeError):
         pass
     # `requested` (--workers) — верхняя граница, а не гарантия.
@@ -726,9 +722,6 @@ def _run_batch_loop(
         )
         future_map = {}
         batch_completed = 0
-        # Время готовности batch (после загрузки всех sample) — начало
-        # окна executor-очереди для задач этого batch.
-        batch_ready_at = time.perf_counter()
         with ThreadPoolExecutor(max_workers=effective_workers) as executor:
             for item in batch:
                 if cancel_event is not None and cancel_event.is_set():
@@ -845,9 +838,7 @@ def _run_task(
     # input starvation (данные ещё не готовы) и перегрузку очереди (задачи
     # ждут executor-слот).
     if item.load_complete_time is not None:
-        telemetry.record_stage(
-            "input_wait", task_started - item.load_complete_time
-        )
+        telemetry.record_stage("input_wait", task_started - item.load_complete_time)
     cache_started = time.perf_counter()
     task_cache_params = {**cache_params, "is_cropped": item.ref.is_cropped}
     prediction = (

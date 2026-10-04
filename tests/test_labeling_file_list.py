@@ -57,9 +57,7 @@ def test_file_list_refresh_keeps_heartbeat_and_sorts(qtbot, big_session, monkeyp
 
     window._load_file_list()
     qtbot.waitUntil(lambda: window.file_list.count() > 0, timeout=15000)
-    qtbot.waitUntil(
-        lambda: window.file_list.count() == FILE_COUNT, timeout=15000
-    )
+    qtbot.waitUntil(lambda: window.file_list.count() == FILE_COUNT, timeout=15000)
     heartbeat.stop()
 
     # Список совпадает с результатом контроллера (перечисление + сортировка).
@@ -84,7 +82,6 @@ def test_file_list_refresh_runs_off_gui_thread(qtbot, big_session, monkeypatch):
     import threading
 
     window = big_session
-    import labeling.labeling_window as lw
 
     thread_ids = []
     real_list = window.controller.list_image_files
@@ -97,9 +94,7 @@ def test_file_list_refresh_runs_off_gui_thread(qtbot, big_session, monkeypatch):
     gui_thread = threading.get_ident()
 
     window._load_file_list()
-    qtbot.waitUntil(
-        lambda: window.file_list.count() == FILE_COUNT, timeout=15000
-    )
+    qtbot.waitUntil(lambda: window.file_list.count() == FILE_COUNT, timeout=15000)
     assert thread_ids and thread_ids[0] != gui_thread
 
 
@@ -124,9 +119,7 @@ def test_stale_file_list_refresh_is_dropped(qtbot, big_session):
     window._load_file_list()  # устареет
     window._load_file_list()  # более новое обновление
 
-    qtbot.waitUntil(
-        lambda: window.file_list.count() == FILE_COUNT, timeout=15000
-    )
+    qtbot.waitUntil(lambda: window.file_list.count() == FILE_COUNT, timeout=15000)
     qtbot.wait(400)  # даём завершиться устаревшему обновлению
     texts = [window.file_list.item(i).text() for i in range(window.file_list.count())]
     assert "stale.png" not in texts, (

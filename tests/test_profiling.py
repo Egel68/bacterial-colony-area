@@ -67,9 +67,7 @@ def test_profiling_does_not_change_reference_masks():
             algorithms=("ClassicDefault",),
         )
     problems = rf.compare_with_baseline(entries, masks, subset)
-    assert not problems, (
-        "профилирование изменило маски/метрики: " + "; ".join(problems)
-    )
+    assert not problems, "профилирование изменило маски/метрики: " + "; ".join(problems)
     assert profiler.totals(), "профилировщик не собрал ни одной стадии"
 
 

@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -230,9 +231,7 @@ def run_all_with_comparison(
     )
 
     # Отображаемый набор алгоритмов сохраняется: лишние результаты скрыты.
-    all_results: AllResults = {
-        name: full_results.get(name, {}) for name in names
-    }
+    all_results: AllResults = {name: full_results.get(name, {}) for name in names}
 
     comparison = None
     if compare_pair:
@@ -259,9 +258,7 @@ def compare_algorithms(
     `run_all_with_comparison` — он не повторяет детекции.
     """
     compared = execute_pipeline(dataset, [name_a, name_b], workers=1)
-    return build_comparison(
-        compared.get(name_a, {}), compared.get(name_b, {})
-    )
+    return build_comparison(compared.get(name_a, {}), compared.get(name_b, {}))
 
 
 def compute_summary(all_results: AllResults) -> List[Dict]:

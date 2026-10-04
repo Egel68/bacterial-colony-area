@@ -11,7 +11,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtCore import Qt
 
 from analysis.geometry import PetriInfo
 from labeling.labeling_window import LabelingWindow
@@ -34,9 +33,7 @@ def session_window(qtbot, tmp_path):
     cv2.imwrite(
         str(window.source_dir / "b.png"), np.full((60, 80, 3), 200, dtype=np.uint8)
     )
-    window.controller.detect_petri = lambda image_bgr: PetriInfo(
-        40, 30, 25, (60, 80)
-    )
+    window.controller.detect_petri = lambda image_bgr: PetriInfo(40, 30, 25, (60, 80))
     window._load_file_list()
     qtbot.waitUntil(lambda: window.file_list.count() > 0, timeout=5000)
     return window
@@ -50,7 +47,9 @@ def _select(window, index: int):
     return item
 
 
-def test_selection_loads_asynchronously_off_gui_thread(qtbot, session_window, monkeypatch):
+def test_selection_loads_asynchronously_off_gui_thread(
+    qtbot, session_window, monkeypatch
+):
     window = session_window
     import threading
 
@@ -89,7 +88,9 @@ def test_mask_is_loaded_together_with_image(qtbot, session_window):
     assert np.array_equal(window.paint_label.mask, mask)
 
 
-def test_stale_result_cannot_overwrite_newer_selection(qtbot, session_window, monkeypatch):
+def test_stale_result_cannot_overwrite_newer_selection(
+    qtbot, session_window, monkeypatch
+):
     """Поздняя загрузка файла A не перезаписывает уже выбранный файл B."""
     window = session_window
     import labeling.labeling_window as lw
@@ -166,7 +167,9 @@ def test_late_result_with_old_generation_is_dropped(qtbot, session_window):
     assert window.current_path == window.source_dir / "b.png"
 
 
-def test_auto_detect_and_crop_reuse_decoded_original(qtbot, session_window, monkeypatch):
+def test_auto_detect_and_crop_reuse_decoded_original(
+    qtbot, session_window, monkeypatch
+):
     """Авто-поиск и обрезка используют декодированный оригинал, не читая файл."""
     window = session_window
     import labeling.labeling_window as lw
@@ -199,6 +202,4 @@ def test_auto_detect_and_crop_reuse_decoded_original(qtbot, session_window, monk
     expected_crop = window.cropped_dir / "a_cropped.png"
     qtbot.waitUntil(lambda: expected_crop.exists(), timeout=5000)
     qtbot.waitUntil(lambda: window.mode == "cropped", timeout=5000)
-    assert list(window.cropped_dir.glob("*_cropped.png")), (
-        "обрезка не создала файл"
-    )
+    assert list(window.cropped_dir.glob("*_cropped.png")), "обрезка не создала файл"

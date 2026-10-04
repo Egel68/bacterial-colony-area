@@ -77,9 +77,7 @@ def _run_detection(
                 task_started = time.perf_counter()
                 algo = get_algorithm(algo_name)
                 algo.detect(fixture.image, is_cropped=fixture.is_cropped)
-                telemetry.record_stage(
-                    "detect", time.perf_counter() - task_started
-                )
+                telemetry.record_stage("detect", time.perf_counter() - task_started)
 
             futures.append(executor.submit(_work))
         for future in futures:
@@ -104,9 +102,7 @@ def _run_detection(
         "process_cpu_seconds": summary["resources"]["process_cpu_time"],
         "cpu_core_equivalents": summary["resources"]["cpu_core_equivalents"],
         "peak_rss_bytes": summary["resources"]["memory"]["peak_rss"],
-        "tasks_per_second": (
-            len(tasks) / duration if duration > 0 else None
-        ),
+        "tasks_per_second": (len(tasks) / duration if duration > 0 else None),
     }
 
 
@@ -214,9 +210,7 @@ def build_report(
             "measured": (
                 "warm-cache: логическое чтение/декодирование повторных входов"
             ),
-            "unmeasured": (
-                "cold-storage I/O: задержки холодного диска НЕ измерялись"
-            ),
+            "unmeasured": ("cold-storage I/O: задержки холодного диска НЕ измерялись"),
             "physical_io_counters": "см. telemetry.io_condition (могут быть 0 из-за page cache)",
             "note": (
                 "Ноль физических read-bytes не означает отсутствие логических "
@@ -303,7 +297,9 @@ def main(argv: List[str] | None = None) -> int:
                     HEARTBEAT_MAX_BUDGET_MS,
                 )
             )
-        print("Базовый отчёт корректен: warm-cache измерен, cold-storage I/O отмечен как неизмеренный.")
+        print(
+            "Базовый отчёт корректен: warm-cache измерен, cold-storage I/O отмечен как неизмеренный."
+        )
         return 0
 
     parser.print_help()

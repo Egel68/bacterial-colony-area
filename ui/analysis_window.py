@@ -10,7 +10,7 @@ from PyQt6.QtGui import QImage, QPixmap
 
 from analysis.params import AnalysisParams
 from ui.background import BackgroundOperation
-from utils.image_loader import load_image, load_image_worker_safe
+from utils.image_loader import load_image_worker_safe
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -64,6 +64,7 @@ def _composite_bgr(
     Формулы наложения совпадают с прежним синхронным `_update_display`;
     при `scale=0.5` геометрия и толщины пересчитываются пропорционально.
     """
+
     def scaled_int(value):
         return max(1, int(round(value * scale))) if scale != 1.0 else int(value)
 
@@ -982,9 +983,7 @@ class AnalysisWindow(QMainWindow):
             return
         rgb = np.ascontiguousarray(rgb)
         h, w = rgb.shape[:2]
-        q_image = QImage(
-            rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888
-        )
+        q_image = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         self.image_label.set_image(QPixmap.fromImage(q_image))
 
     def _save_result(self):

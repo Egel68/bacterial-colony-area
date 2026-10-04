@@ -893,16 +893,19 @@ def test_large_result_set_renders_with_live_heartbeat(qtbot, window):
     )
     # Model/view: число созданных виджетов не растёт с числом строк.
     assert window.table.indexWidget(window.summary_model.index(0, 0)) is None
-    assert window.table.indexWidget(
-        window.summary_model.index(total_rows - 1, 5)
-    ) is None
+    assert (
+        window.table.indexWidget(window.summary_model.index(total_rows - 1, 5)) is None
+    )
 
 
 def test_model_view_incremental_append_keeps_existing_rows(qtbot, window):
     """Инкрементальное наполнение не теряет ранее добавленные строки (7.2)."""
     window.summary_model.set_summary([{"name": "A", "metrics": {"iou": 1.0}}])
     window.summary_model.append_summary(
-        [{"name": "B", "metrics": {"iou": 0.5}}, {"name": "C", "metrics": {"iou": 0.25}}]
+        [
+            {"name": "B", "metrics": {"iou": 0.5}},
+            {"name": "C", "metrics": {"iou": 0.25}},
+        ]
     )
     assert window.summary_model.rowCount() == 3
     assert window.summary_model.data(window.summary_model.index(0, 0)) == "A"
@@ -953,9 +956,7 @@ def test_generate_report_atomic_publishes_on_success(tmp_path):
     assert "ClassicDefault" in text, "содержимое отчёта должно быть совместимо"
     assert "0.9000" in text
     # Временные файлы не остаются.
-    leftovers = [
-        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
-    ]
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
     assert leftovers == [], f"остались временные файлы: {leftovers}"
 
 
@@ -984,9 +985,7 @@ def test_generate_report_atomic_failure_keeps_existing_target(tmp_path):
     assert target.read_text(encoding="utf-8") == "СУЩЕСТВУЮЩИЙ ОТЧЁТ", (
         "существующий отчёт должен остаться неизменным"
     )
-    leftovers = [
-        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
-    ]
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
     assert leftovers == [], f"частичный отчёт остался: {leftovers}"
 
 
@@ -1009,9 +1008,7 @@ def test_generate_report_atomic_cancel_keeps_existing_target(tmp_path):
         )
 
     assert target.read_text(encoding="utf-8") == "СТАРЫЙ"
-    leftovers = [
-        p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")
-    ]
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
     assert leftovers == [], f"частичный отчёт остался: {leftovers}"
 
 
@@ -1034,9 +1031,7 @@ def test_export_runs_in_background_and_reports_status(
     )
 
     window._export_report()
-    qtbot.waitUntil(
-        lambda: not window._export_op.is_running(), timeout=15000
-    )
+    qtbot.waitUntil(lambda: not window._export_op.is_running(), timeout=15000)
 
     assert not criticals, f"экспорт сообщил ошибку: {criticals}"
     assert window.status_label.text().startswith("Отчёт сохранён"), (
@@ -1085,12 +1080,8 @@ def test_cancel_button_stops_run_at_safe_boundary(qtbot, tmp_path, monkeypatch):
     window = TestingWindow()
     qtbot.addWidget(window)
     window.dataset_input.setText(str(tmp_path))
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
-    )
+    monkeypatch.setattr("ui.testing_window.QMessageBox.warning", lambda *a, **k: None)
+    monkeypatch.setattr("ui.testing_window.QMessageBox.critical", lambda *a, **k: None)
     # Выбираем только медленный алгоритм.
     for name, checkbox in window._algo_checkboxes.items():
         checkbox.setChecked(name == "SlowCancelGUI")
@@ -1144,12 +1135,8 @@ def test_close_during_run_defers_and_stays_responsive(qtbot, tmp_path, monkeypat
     window = TestingWindow()
     qtbot.addWidget(window)
     window.dataset_input.setText(str(tmp_path))
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
-    )
+    monkeypatch.setattr("ui.testing_window.QMessageBox.warning", lambda *a, **k: None)
+    monkeypatch.setattr("ui.testing_window.QMessageBox.critical", lambda *a, **k: None)
     for name, checkbox in window._algo_checkboxes.items():
         checkbox.setChecked(name == "MediumCloseGUI")
     try:
@@ -1197,12 +1184,8 @@ def test_late_results_not_applied_after_close_requested(qtbot, tmp_path, monkeyp
     _INSTANCES["LateResultGUI"] = _LateAlgo()
     window = TestingWindow()
     qtbot.addWidget(window)
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
-    )
+    monkeypatch.setattr("ui.testing_window.QMessageBox.warning", lambda *a, **k: None)
+    monkeypatch.setattr("ui.testing_window.QMessageBox.critical", lambda *a, **k: None)
     window._closing = True  # окно уже запросило закрытие
     worker = _RunWorker(str(tmp_path), ["LateResultGUI"])
     finished = []

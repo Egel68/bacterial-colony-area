@@ -118,9 +118,7 @@ def _petri_stub(size=120):
 def _patch_dialogs(monkeypatch, criticals=None):
     import ui.analysis_window as aw
 
-    monkeypatch.setattr(
-        aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
         aw.QMessageBox,
         "critical",
@@ -146,9 +144,7 @@ def _make_window(qtbot, image_path, monkeypatch, dish_delay=0.0):
     return window
 
 
-def test_initial_load_and_detection_keep_gui_responsive(
-    qtbot, tmp_path, monkeypatch
-):
+def test_initial_load_and_detection_keep_gui_responsive(qtbot, tmp_path, monkeypatch):
     """5.1: heartbeat и действия пользователя живут во время загрузки/поиска."""
     import ui.analysis_window as aw
 
@@ -219,8 +215,10 @@ def test_load_error_is_recoverable(qtbot, tmp_path, monkeypatch):
     window.show()
     qtbot.waitExposed(window)
     qtbot.waitUntil(
-        lambda: window._init_operation is not None
-        and not window._init_operation.is_running(),
+        lambda: (
+            window._init_operation is not None
+            and not window._init_operation.is_running()
+        ),
         timeout=5000,
     )
     assert any("битый файл" in message for message in criticals)
@@ -273,8 +271,10 @@ def test_classic_analysis_error_is_reported(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(AnalysisController, "analyze", broken_analyze)
     window = _make_window(qtbot, image_path, monkeypatch)
     qtbot.waitUntil(
-        lambda: window._analysis_operation is not None
-        and not window._analysis_operation.is_running(),
+        lambda: (
+            window._analysis_operation is not None
+            and not window._analysis_operation.is_running()
+        ),
         timeout=5000,
     )
     assert any("сбой анализа" in message for message in criticals)

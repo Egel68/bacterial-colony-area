@@ -183,7 +183,10 @@ def test_benchmark_baseline_report_structure():
     io_conditions = report["io_conditions"]
     assert "warm-cache" in io_conditions["measured"]
     assert "cold" in io_conditions["unmeasured"].lower()
-    assert "не" in io_conditions["unmeasured"].lower() or "NOT" in io_conditions["unmeasured"]
+    assert (
+        "не" in io_conditions["unmeasured"].lower()
+        or "NOT" in io_conditions["unmeasured"]
+    )
 
     # Heartbeat записан (или явно unavailable — не нулевые значения).
     heartbeat = report["heartbeat"]
@@ -197,7 +200,6 @@ def test_benchmark_baseline_report_structure():
 
 def test_benchmark_baseline_check_accepts_written_report():
     """--check принимает записанный базовый отчёт (1.3)."""
-    import json
     import sys
     from pathlib import Path
 

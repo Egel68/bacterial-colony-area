@@ -8,7 +8,12 @@ import testing.scheduler as testing_scheduler
 from testing.cache import PredictionCache
 from testing.baseline import BaselineDataset, run_baseline
 from testing.dataset import TestDataset
-from testing.scheduler import _should_reduce_workers, iter_batches, execute_pipeline, PipelineDiagnostics
+from testing.scheduler import (
+    _should_reduce_workers,
+    iter_batches,
+    execute_pipeline,
+    PipelineDiagnostics,
+)
 from testing.telemetry import TelemetryCollector
 
 
@@ -439,14 +444,6 @@ def test_scheduler_queue_wait_starts_at_task_submission(tmp_path):
         dataset = TestDataset(root=str(root), load_images=False)
         telemetry = TelemetryCollector(enabled=True)
 
-        batches = list(
-            iter_batches(
-                dataset,
-                batch_size=3,
-                telemetry=telemetry,
-                use_cropped=False,
-            )
-        )
         from testing.scheduler import execute_pipeline
 
         execute_pipeline(
@@ -511,9 +508,7 @@ def test_input_wait_and_queue_wait_reported_separately(tmp_path):
         assert "input_wait" in latency, (
             "input_wait (ожидание подготовленных входных данных) не замерен"
         )
-        assert "queue_wait" in latency, (
-            "queue_wait (executor-очередь) не замерен"
-        )
+        assert "queue_wait" in latency, "queue_wait (executor-очередь) не замерен"
         assert latency["input_wait"]["count"] == latency["queue_wait"]["count"]
         # Обе стадии имеют независимые значения (не дубликат одного замера).
         assert "image_decode" in latency
@@ -521,7 +516,6 @@ def test_input_wait_and_queue_wait_reported_separately(tmp_path):
         from testing.registry import _INSTANCES
 
         _INSTANCES.pop("QuickAlgoIW", None)
-import testing.scheduler as testing_scheduler
 
 
 # --- Задача 2.3: CPU core-equivalents, affinity/quota, effective worker limits ---
@@ -571,9 +565,7 @@ def test_summary_reports_effective_worker_limits():
     """Эффективные лимиты параллельности фиксируются с указанием источника."""
     telemetry = TelemetryCollector(enabled=True)
     telemetry.start()
-    telemetry.record_worker_limits(
-        outer_workers=4, native_threads=2, source="explicit"
-    )
+    telemetry.record_worker_limits(outer_workers=4, native_threads=2, source="explicit")
     summary = telemetry.summary()
     limits = summary["worker_limits"]
     assert limits["outer_workers"] == 4
@@ -593,6 +585,7 @@ def test_default_worker_limits_are_unknown_not_zero():
 
 def test_execute_pipeline_records_worker_limits_and_cpu_availability(tmp_path):
     """Интеграция: execute_pipeline записывает лимиты и доступность CPU."""
+
     class _QuickAlgo:
         name = "QuickAlgoWL"
         description = "тест"
@@ -653,7 +646,6 @@ def test_graceful_degradation_without_psutil(monkeypatch):
     finally:
         if original is not None:
             monkeypatch.setitem(sys.modules, "psutil", original)
-
 
 
 # --- Задача 2.4: авто-ёмкость worker из affinity/quota; --workers как верхняя граница ---
@@ -726,7 +718,9 @@ def test_effective_workers_respects_affinity_restriction(monkeypatch):
     monkeypatch.setattr(sched, "_host_cpu_count", lambda: 8)
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: 2)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: None)
-    result = sched._effective_workers(None, task_count=100, memory_budget=None, batch_bytes=0)
+    result = sched._effective_workers(
+        None, task_count=100, memory_budget=None, batch_bytes=0
+    )
     assert result <= 2, f"affinity=2, но выбрано {result} workers"
 
 
@@ -753,10 +747,10 @@ def test_effective_workers_unknown_all_conservative(monkeypatch):
     monkeypatch.setattr(sched, "_host_cpu_count", lambda: None)
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: None)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: None)
-    result = sched._effective_workers(None, task_count=10, memory_budget=None, batch_bytes=0)
-    assert result == 1, (
-        f"консервативный fallback должен давать 1, а не {result}"
+    result = sched._effective_workers(
+        None, task_count=10, memory_budget=None, batch_bytes=0
     )
+    assert result == 1, f"консервативный fallback должен давать 1, а не {result}"
 
 
 def test_effective_workers_explicit_valid_limits(monkeypatch):
@@ -767,20 +761,33 @@ def test_effective_workers_explicit_valid_limits(monkeypatch):
     monkeypatch.setattr(sched, "_host_cpu_count", lambda: None)
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: None)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: None)
-    assert sched._effective_workers(1, task_count=10, memory_budget=None, batch_bytes=0) == 1
-    assert sched._effective_workers(2, task_count=10, memory_budget=None, batch_bytes=0) == 1, (
-        "при ёмкости 1 explicit --workers=2 не должен давать больше 1"
+    assert (
+        sched._effective_workers(1, task_count=10, memory_budget=None, batch_bytes=0)
+        == 1
     )
+    assert (
+        sched._effective_workers(2, task_count=10, memory_budget=None, batch_bytes=0)
+        == 1
+    ), "при ёмкости 1 explicit --workers=2 не должен давать больше 1"
 
     # Случай 2: ёмкость достаточна (8) -> оба значения выбираются точно.
     monkeypatch.setattr(sched, "_host_cpu_count", lambda: 8)
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: 8)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: 8.0)
-    assert sched._effective_workers(1, task_count=10, memory_budget=None, batch_bytes=0) == 1
-    assert sched._effective_workers(2, task_count=10, memory_budget=None, batch_bytes=0) == 2
+    assert (
+        sched._effective_workers(1, task_count=10, memory_budget=None, batch_bytes=0)
+        == 1
+    )
+    assert (
+        sched._effective_workers(2, task_count=10, memory_budget=None, batch_bytes=0)
+        == 2
+    )
 
     # Случай 3: задач меньше --workers -> ограничено числом задач.
-    assert sched._effective_workers(2, task_count=1, memory_budget=None, batch_bytes=0) == 1
+    assert (
+        sched._effective_workers(2, task_count=1, memory_budget=None, batch_bytes=0)
+        == 1
+    )
 
 
 def test_effective_workers_never_exceeds_task_count(monkeypatch):
@@ -789,8 +796,14 @@ def test_effective_workers_never_exceeds_task_count(monkeypatch):
 
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: 32)
     monkeypatch.setattr(sched, "_quota_cpu_cores", lambda: 32.0)
-    assert sched._effective_workers(16, task_count=3, memory_budget=None, batch_bytes=0) == 3
-    assert sched._effective_workers(None, task_count=1, memory_budget=None, batch_bytes=0) == 1
+    assert (
+        sched._effective_workers(16, task_count=3, memory_budget=None, batch_bytes=0)
+        == 3
+    )
+    assert (
+        sched._effective_workers(None, task_count=1, memory_budget=None, batch_bytes=0)
+        == 1
+    )
 
 
 def test_effective_workers_zero_tasks_returns_one(monkeypatch):
@@ -798,7 +811,10 @@ def test_effective_workers_zero_tasks_returns_one(monkeypatch):
     from testing import scheduler as sched
 
     monkeypatch.setattr(sched, "_affinity_cpu_count", lambda: 4)
-    assert sched._effective_workers(4, task_count=0, memory_budget=None, batch_bytes=0) == 1
+    assert (
+        sched._effective_workers(4, task_count=0, memory_budget=None, batch_bytes=0)
+        == 1
+    )
 
 
 def test_effective_workers_rejects_nonpositive_workers():
@@ -827,7 +843,9 @@ def test_decoded_input_budget_reserves_headroom():
     assert ALGORITHM_HEADROOM_RATIO == 0.25
 
     budget = _decoded_input_budget(1000)
-    assert budget == 750, f"бюджет входов должен быть 75% от memory_budget, а не {budget}"
+    assert budget == 750, (
+        f"бюджет входов должен быть 75% от memory_budget, а не {budget}"
+    )
 
     budget = _decoded_input_budget(8)
     assert budget == 6, "простой расчёт 8 - 2 = 6"
@@ -871,9 +889,7 @@ def test_memory_budget_bounds_active_and_prefetched_inputs(tmp_path):
         assert batch_bytes <= 768, (
             f"batch содержит {batch_bytes} байт, что больше бюджета входов 768"
         )
-    assert sum(len(batch) for batch in batches) == 10, (
-        "не все пары обработаны"
-    )
+    assert sum(len(batch) for batch in batches) == 10, "не все пары обработаны"
 
 
 def test_oversized_pair_is_isolated(tmp_path):
@@ -1054,9 +1070,7 @@ def test_resource_policy_interactive_reserves_gui_core():
     assert GUI_RESERVED_CORES == 1
     interactive = resolve_resource_policy(interactive=True, total_capacity=8)
     batch = resolve_resource_policy(interactive=False, total_capacity=8)
-    assert interactive.algorithm_workers == 7, (
-        "GUI: бюджет = capacity - 1 (8 - 1 = 7)"
-    )
+    assert interactive.algorithm_workers == 7, "GUI: бюджет = capacity - 1 (8 - 1 = 7)"
     assert batch.algorithm_workers == 8
     assert interactive.effective_concurrency <= 8
 
@@ -1066,9 +1080,7 @@ def test_resource_policy_interactive_on_small_host_is_safe():
     from testing.resource_policy import resolve_resource_policy
 
     policy = resolve_resource_policy(interactive=True, total_capacity=2)
-    assert policy.algorithm_workers >= 1, (
-        "даже на 2 ядрах остался хотя бы 1 worker"
-    )
+    assert policy.algorithm_workers >= 1, "даже на 2 ядрах остался хотя бы 1 worker"
     assert policy.effective_concurrency <= 2
 
 
@@ -1156,13 +1168,12 @@ def test_apply_native_limits_sets_current_policy():
         # Без onnxruntime возвращает None (грациозная деградация).
         options = onnx_session_options()
         assert options is None or hasattr(options, "intra_op_num_threads")
-    assert current_policy() is None, (
-        "после выхода текущая политика должна сбрасываться"
-    )
+    assert current_policy() is None, "после выхода текущая политика должна сбрасываться"
 
 
 def test_execute_pipeline_applies_resource_policy(tmp_path):
     """Интеграция: execute_pipeline использует единую политику (2.6)."""
+
     class _QuickAlgoRP:
         name = "QuickAlgoRP"
         description = "тест"
@@ -1171,7 +1182,6 @@ def test_execute_pipeline_applies_resource_policy(tmp_path):
             return np.zeros(image.shape[:2], dtype=np.uint8)
 
     from testing.registry import register_algorithm_instance
-    from testing.resource_policy import resolve_resource_policy
 
     register_algorithm_instance("QuickAlgoRP", _QuickAlgoRP())
     try:
@@ -1337,9 +1347,7 @@ def test_prefetch_memory_budget_backpressure():
     assert peak_outstanding[0] <= budget, (
         f"пик {peak_outstanding[0]} превысил бюджет {budget}"
     )
-    assert loader.outstanding_bytes == 0, (
-        "после task_done задолженность должна быть 0"
-    )
+    assert loader.outstanding_bytes == 0, "после task_done задолженность должна быть 0"
 
 
 def test_prefetch_oversized_item_is_handled():
@@ -1452,9 +1460,7 @@ def test_prefetch_cleanup_on_failure():
                 consumed.append(item)
                 loader.task_done(item)
     assert consumed == [1], f"получено {consumed} до ошибки"
-    assert not loader._thread.is_alive(), (
-        "producer-поток не завершился после ошибки"
-    )
+    assert not loader._thread.is_alive(), "producer-поток не завершился после ошибки"
 
 
 def test_prefetch_close_is_deterministic():

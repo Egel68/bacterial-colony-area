@@ -24,7 +24,7 @@ import platform
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = 1
 

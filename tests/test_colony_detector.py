@@ -34,6 +34,7 @@ class TestFilterComponents:
 
         Референс — прежний алгоритм (повторный проход по меткам).
         """
+
         def loop_filter(mask, min_size):
             num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
                 mask, connectivity=8

@@ -44,12 +44,8 @@ def _make_window(qtbot, tmp_path, monkeypatch, size=200):
     )
     import ui.analysis_window as aw
 
-    monkeypatch.setattr(
-        aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
-    monkeypatch.setattr(
-        aw.QMessageBox, "critical", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(aw.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
     window = AnalysisWindow(str(image_path))
     qtbot.addWidget(window)
     window.show()
@@ -57,8 +53,10 @@ def _make_window(qtbot, tmp_path, monkeypatch, size=200):
     qtbot.waitUntil(lambda: window.petri_info is not None, timeout=5000)
     qtbot.waitUntil(lambda: not window._analysis_busy, timeout=30000)
     qtbot.waitUntil(
-        lambda: window.image_label.pixmap() is not None
-        and not window.image_label.pixmap().isNull(),
+        lambda: (
+            window.image_label.pixmap() is not None
+            and not window.image_label.pixmap().isNull()
+        ),
         timeout=5000,
     )
     return window
@@ -66,8 +64,10 @@ def _make_window(qtbot, tmp_path, monkeypatch, size=200):
 
 def _wait_display_idle(window, qtbot, timeout=5000):
     qtbot.waitUntil(
-        lambda: window._display_operation is not None
-        and not window._display_operation.is_running(),
+        lambda: (
+            window._display_operation is not None
+            and not window._display_operation.is_running()
+        ),
         timeout=timeout,
     )
 
@@ -130,9 +130,7 @@ def test_render_presentation_keeps_full_resolution_inputs():
     rng = np.random.RandomState(11)
     original = rng.randint(0, 255, (400, 500, 3), dtype=np.uint8)
     preprocessed = rng.randint(0, 255, (400, 500), dtype=np.uint8)
-    colony_mask = (rng.randint(0, 2, (400, 500), dtype=np.uint8) * 255).astype(
-        np.uint8
-    )
+    colony_mask = (rng.randint(0, 2, (400, 500), dtype=np.uint8) * 255).astype(np.uint8)
     petri_info = PetriInfo(250, 200, 150, (400, 500))
 
     original_before = original.copy()
@@ -203,7 +201,6 @@ def test_render_presentation_modes_preserve_semantics():
 
 def test_half_resolution_path_is_taken_below_threshold():
     """Для малых отображений используется быстрый путь 1/2."""
-    import cv2
 
     original = np.full((2000, 2000, 3), 60, dtype=np.uint8)
     petri_info = PetriInfo(1000, 1000, 800, (2000, 2000))

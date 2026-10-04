@@ -119,12 +119,8 @@ def test_analysis_load_and_detection_keep_heartbeat(qtbot, tmp_path, monkeypatch
         return mask, PetriInfo(w // 2, h // 2, min(w, h) // 3, (h, w))
 
     monkeypatch.setattr(aw.AnalysisController, "find_petri_dish", slow_find)
-    monkeypatch.setattr(
-        aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
-    monkeypatch.setattr(
-        aw.QMessageBox, "critical", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(aw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(aw.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
 
     window = AnalysisWindow(str(image_path))
     qtbot.addWidget(window)
@@ -135,11 +131,13 @@ def test_analysis_load_and_detection_keep_heartbeat(qtbot, tmp_path, monkeypatch
         window,
         qtbot,
         lambda: None,
-        wait_predicate=lambda: window.original_image is not None
-        and window._init_operation is not None
-        and not window._init_operation.is_running()
-        and window._analysis_operation is not None
-        and not window._analysis_operation.is_running(),
+        wait_predicate=lambda: (
+            window.original_image is not None
+            and window._init_operation is not None
+            and not window._init_operation.is_running()
+            and window._analysis_operation is not None
+            and not window._analysis_operation.is_running()
+        ),
         timeout=15000,
     )
     assert_within_reference_limits(p95, max_interval)
@@ -165,9 +163,7 @@ def labeling_window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         lw.QMessageBox, "information", staticmethod(lambda *a, **k: None)
     )
-    monkeypatch.setattr(
-        lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
         lw.QMessageBox,
         "question",
@@ -183,9 +179,7 @@ def test_labeling_file_selection_keeps_heartbeat(qtbot, labeling_window, monkeyp
     window = labeling_window
     for index in range(12):
         path = window.source_dir / f"sel-{index}.png"
-        cv2.imwrite(
-            str(path), np.full((1200, 1200, 3), index * 5 + 1, dtype=np.uint8)
-        )
+        cv2.imwrite(str(path), np.full((1200, 1200, 3), index * 5 + 1, dtype=np.uint8))
     window._load_file_list()
 
     def select_next():
@@ -194,9 +188,11 @@ def test_labeling_file_selection_keeps_heartbeat(qtbot, labeling_window, monkeyp
         window._on_file_selected(item)
 
     qtbot.waitUntil(
-        lambda: window._list_operation is not None
-        and not window._list_operation.is_running()
-        and window.file_list.count() > 0,
+        lambda: (
+            window._list_operation is not None
+            and not window._list_operation.is_running()
+            and window.file_list.count() > 0
+        ),
         timeout=5000,
     )
     import labeling.labeling_window as lw
@@ -217,9 +213,11 @@ def test_labeling_file_selection_keeps_heartbeat(qtbot, labeling_window, monkeyp
         window,
         qtbot,
         select_next,
-        wait_predicate=lambda: window.paint_label._image is not None
-        and window._detect_operation is not None
-        and not window._detect_operation.is_running(),
+        wait_predicate=lambda: (
+            window.paint_label._image is not None
+            and window._detect_operation is not None
+            and not window._detect_operation.is_running()
+        ),
         timeout=15000,
     )
     assert_within_reference_limits(p95, max_interval)
@@ -243,7 +241,10 @@ def test_labeling_brush_strokes_keep_heartbeat(qtbot, labeling_window):
             driver.stop()
             return
         window.paint_label._paint_at(
-            (100 + (state["i"] * 7) % (size - 200), 100 + (state["i"] * 11) % (size - 200))
+            (
+                100 + (state["i"] * 7) % (size - 200),
+                100 + (state["i"] * 11) % (size - 200),
+            )
         )
         state["i"] += 1
 
@@ -300,16 +301,15 @@ def test_labeling_copy_images_keeps_heartbeat(qtbot, labeling_window, monkeypatc
             time.sleep(0.12)
             return real_copy(src, dst)
 
-        monkeypatch.setattr(
-            lw.shutil, "copy2", delayed_copy, raising=False
-        )
+        monkeypatch.setattr(lw.shutil, "copy2", delayed_copy, raising=False)
         p95, max_interval = measure_heartbeat(
             window,
             qtbot,
             window._on_add_images,
-            wait_predicate=lambda: getattr(window, "_copy_operation", None)
-            is not None
-            and not window._copy_operation.is_running(),
+            wait_predicate=lambda: (
+                getattr(window, "_copy_operation", None) is not None
+                and not window._copy_operation.is_running()
+            ),
             timeout=30000,
         )
     assert_within_reference_limits(p95, max_interval)
@@ -324,7 +324,6 @@ def test_labeling_save_and_zip_keep_heartbeat(qtbot, labeling_window, monkeypatc
     window.paint_label.set_image(np.zeros((size, size, 3), dtype=np.uint8), mask)
     # Детерминированно удерживаем только файловую операцию дольше heartbeat
     # интервала; изображение и маска остаются компактными и реалистичными.
-    import labeling.labeling_window as lw
 
     real_save = window.controller.save_mask
 
@@ -343,8 +342,10 @@ def test_labeling_save_and_zip_keep_heartbeat(qtbot, labeling_window, monkeypatc
         window,
         qtbot,
         save_then_zip,
-        wait_predicate=lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        wait_predicate=lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         minimum_ticks=1,
         timeout=30000,
     )
@@ -366,9 +367,10 @@ def test_labeling_save_and_zip_keep_heartbeat(qtbot, labeling_window, monkeypatc
         window,
         qtbot,
         window._on_export_zip,
-        wait_predicate=lambda: getattr(window, "_export_operation", None)
-        is not None
-        and not window._export_operation.is_running(),
+        wait_predicate=lambda: (
+            getattr(window, "_export_operation", None) is not None
+            and not window._export_operation.is_running()
+        ),
         timeout=30000,
         minimum_ticks=1,
     )
@@ -408,12 +410,8 @@ def test_testing_run_and_presentation_keep_heartbeat(qtbot, tmp_path, monkeypatc
     window = TestingWindow()
     qtbot.addWidget(window)
     window.dataset_input.setText(str(tmp_path))
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.warning", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "ui.testing_window.QMessageBox.critical", lambda *a, **k: None
-    )
+    monkeypatch.setattr("ui.testing_window.QMessageBox.warning", lambda *a, **k: None)
+    monkeypatch.setattr("ui.testing_window.QMessageBox.critical", lambda *a, **k: None)
     for name, checkbox in window._algo_checkboxes.items():
         checkbox.setChecked(name == "HbRunAlgo")
     try:
@@ -421,7 +419,11 @@ def test_testing_run_and_presentation_keep_heartbeat(qtbot, tmp_path, monkeypatc
             window,
             qtbot,
             window._start_run,
-            wait_predicate=lambda: window._results is not None and window._thread is not None and not window._thread.isRunning(),
+            wait_predicate=lambda: (
+                window._results is not None
+                and window._thread is not None
+                and not window._thread.isRunning()
+            ),
             minimum_ticks=10,
             timeout=30000,
         )
@@ -482,9 +484,11 @@ def test_testing_report_export_keeps_heartbeat(qtbot, tmp_path, monkeypatch):
         window,
         qtbot,
         window._export_report,
-        wait_predicate=lambda: window._export_op is not None
-        and not window._export_op.is_running()
-        and Path(out_path).exists(),
+        wait_predicate=lambda: (
+            window._export_op is not None
+            and not window._export_op.is_running()
+            and Path(out_path).exists()
+        ),
         timeout=30000,
         minimum_ticks=1,
     )

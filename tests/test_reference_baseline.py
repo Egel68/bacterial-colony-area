@@ -130,10 +130,6 @@ def test_cli_write_and_check_roundtrip(tmp_path, monkeypatch):
 
     # Порча baseline должна обнаруживаться.
     record = json.loads((tmp_path / "reference_masks.json").read_text("utf-8"))
-    record["entries"]["ordinary_source"]["ClassicDefault"]["metrics"][
-        "iou"
-    ] += 0.05
-    (tmp_path / "reference_masks.json").write_text(
-        json.dumps(record), encoding="utf-8"
-    )
+    record["entries"]["ordinary_source"]["ClassicDefault"]["metrics"]["iou"] += 0.05
+    (tmp_path / "reference_masks.json").write_text(json.dumps(record), encoding="utf-8")
     assert rf.main(["--check"]) == 1

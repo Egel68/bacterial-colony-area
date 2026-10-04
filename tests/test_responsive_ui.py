@@ -591,8 +591,10 @@ def test_labeling_window_toolbar_and_image_fit_compact_sizes(
     # Загрузка изображения асинхронна (задача 6.1): дожидаемся результата.
     qtbot.waitUntil(lambda: window.current_path == source_path, timeout=5000)
     qtbot.waitUntil(
-        lambda: window.paint_label._image is not None
-        and window.paint_label._image.shape[:2] == image.shape[:2],
+        lambda: (
+            window.paint_label._image is not None
+            and window.paint_label._image.shape[:2] == image.shape[:2]
+        ),
         timeout=5000,
     )
 

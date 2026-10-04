@@ -29,13 +29,9 @@ def empty_window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         lw.QMessageBox, "information", staticmethod(lambda *a, **k: None)
     )
-    monkeypatch.setattr(
-        lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     window._load_file_list()
-    qtbot.waitUntil(
-        lambda: not window._list_operation.is_running(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: not window._list_operation.is_running(), timeout=5000)
     return window
 
 
@@ -73,8 +69,10 @@ def test_copy_success_with_progress(qtbot, empty_window, tmp_path, monkeypatch):
 
     _run_add(window, monkeypatch, files)
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and not window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None
+            and not window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     assert "Скопировано изображений: 3" in window.status_label.text()
@@ -100,8 +98,10 @@ def test_copy_runs_off_gui_thread(qtbot, empty_window, tmp_path, monkeypatch):
     monkeypatch.setattr(lw.shutil, "copy2", tracked_copy2)
     _run_add(window, monkeypatch, files)
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and not window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None
+            and not window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     assert thread_ids and thread_ids[0] != gui_thread
@@ -117,8 +117,10 @@ def test_copy_overwrites_matching_names(qtbot, empty_window, tmp_path, monkeypat
 
     _run_add(window, monkeypatch, files)
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and not window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None
+            and not window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     overwritten = cv2.imread(str(existing))
@@ -147,8 +149,10 @@ def test_copy_failure_keeps_already_copied_files(
     monkeypatch.setattr(lw.shutil, "copy2", failing_copy2)
     _run_add(window, monkeypatch, files)
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and not window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None
+            and not window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     assert "Ошибка" in window.status_label.text()
@@ -176,19 +180,16 @@ def test_copy_cancellation_stops_between_files(
     monkeypatch.setattr(lw.shutil, "copy2", slow_copy2)
     _run_add(window, monkeypatch, files)
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None and window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     qtbot.wait(120)
     window._copy_operation.cancel()
-    qtbot.waitUntil(
-        lambda: not window._copy_operation.is_running(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: not window._copy_operation.is_running(), timeout=5000)
     copied = list(window.source_dir.glob("*.png"))
     assert 0 < len(copied) < 10, (
         f"отмена не остановила копирование между файлами: {len(copied)}"
     )
-    qtbot.waitUntil(
-        lambda: "отменено" in window.status_label.text(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: "отменено" in window.status_label.text(), timeout=5000)

@@ -8,18 +8,6 @@ import cv2
 import numpy as np
 from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen
-
-from analysis.geometry import PetriInfo
-from labeling.session_manager import ensure_session_structure
-from ui.background import BackgroundOperation
-from ui.controllers.labeling_controller import LabelingController
-from ui.responsive import (
-    install_application_responsive_sizing,
-    set_responsive_stylesheet,
-)
-from utils.image_loader import load_image, load_image_worker_safe
-
-log = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -37,6 +25,19 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+from analysis.geometry import PetriInfo
+from labeling.session_manager import ensure_session_structure
+from ui.background import BackgroundOperation
+from ui.controllers.labeling_controller import LabelingController
+from ui.responsive import (
+    install_application_responsive_sizing,
+    set_responsive_stylesheet,
+)
+from utils.image_loader import load_image, load_image_worker_safe
+
+log = logging.getLogger(__name__)
 
 
 class PaintLabel(QLabel):
@@ -872,8 +873,7 @@ class LabelingWindow(QMainWindow):
         QMessageBox.warning(
             self,
             "Ошибка копирования",
-            f"Копирование прервано:\n{message}\n\n"
-            "Уже скопированные файлы сохранены.",
+            f"Копирование прервано:\n{message}\n\nУже скопированные файлы сохранены.",
         )
         # Частично скопированные файлы должны быть видны в списке.
         self._load_file_list()
@@ -1290,9 +1290,7 @@ class LabelingWindow(QMainWindow):
         operation.error_raised.connect(self._on_export_failed)
         operation.cancellation_confirmed.connect(self._on_export_cancelled)
         self._export_operation = operation
-        operation.start(
-            session_dir=str(self.session_dir), final_path=str(zip_path)
-        )
+        operation.start(session_dir=str(self.session_dir), final_path=str(zip_path))
 
     def _export_zip_work(self, ctx, session_dir: str, final_path: str):
         """Worker: ZIP через временный файл, публикация только после успеха.
@@ -1321,9 +1319,7 @@ class LabelingWindow(QMainWindow):
 
     def _on_export_finished(self, result, generation: int):
         final = result["final_path"]
-        QMessageBox.information(
-            self, "Экспорт завершён", f"Архив сохранён:\n{final}"
-        )
+        QMessageBox.information(self, "Экспорт завершён", f"Архив сохранён:\n{final}")
         self.status_label.setText("✅ Экспорт ZIP завершён")
 
     def _on_export_failed(self, message: str, generation: int):
@@ -1384,6 +1380,4 @@ class LabelingWindow(QMainWindow):
 
     def _on_save_failed(self, message: str, generation: int):
         self.status_label.setText("❌ Ошибка сохранения маски")
-        QMessageBox.warning(
-            self, "Ошибка", f"Не удалось сохранить маску:\n{message}"
-        )
+        QMessageBox.warning(self, "Ошибка", f"Не удалось сохранить маску:\n{message}")

@@ -31,9 +31,7 @@ def labeled_window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         lw.QMessageBox, "information", staticmethod(lambda *a, **k: None)
     )
-    monkeypatch.setattr(
-        lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     window._load_file_list()
     qtbot.waitUntil(lambda: window.file_list.count() > 0, timeout=5000)
     return window
@@ -77,18 +75,14 @@ def test_auto_detect_runs_in_worker_and_preserves_geometry(
 
 def test_crop_preserves_pixels_and_naming_contract(qtbot, labeled_window):
     window = labeled_window
-    window.controller.detect_petri = lambda image_bgr: PetriInfo(
-        40, 30, 25, (60, 80)
-    )
+    window.controller.detect_petri = lambda image_bgr: PetriInfo(40, 30, 25, (60, 80))
     _select(window)
     qtbot.waitUntil(lambda: window.petri_info is not None, timeout=5000)
 
     window._on_crop()
     expected_path = window.cropped_dir / "sample_cropped.png"
     qtbot.waitUntil(lambda: expected_path.exists(), timeout=5000)
-    qtbot.waitUntil(
-        lambda: not window._crop_operation.is_running(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: not window._crop_operation.is_running(), timeout=5000)
 
     # Контракт имён и пиксели обрезка совпадают с контроллером.
     reference = window.controller.crop_by_petri(
@@ -110,8 +104,10 @@ def test_auto_detect_failure_recovers(qtbot, labeled_window, monkeypatch):
     window.controller.detect_petri = broken_detect
     _select(window)
     qtbot.waitUntil(
-        lambda: window._detect_operation is not None
-        and not window._detect_operation.is_running(),
+        lambda: (
+            window._detect_operation is not None
+            and not window._detect_operation.is_running()
+        ),
         timeout=5000,
     )
     assert "Ошибка" in window.status_label.text() or "не найдена" in (
@@ -119,18 +115,14 @@ def test_auto_detect_failure_recovers(qtbot, labeled_window, monkeypatch):
     )
 
     # Окно восстановилось: можно выбрать файл повторно.
-    window.controller.detect_petri = lambda image_bgr: PetriInfo(
-        40, 30, 25, (60, 80)
-    )
+    window.controller.detect_petri = lambda image_bgr: PetriInfo(40, 30, 25, (60, 80))
     _select(window)
     qtbot.waitUntil(lambda: window.petri_info is not None, timeout=5000)
 
 
 def test_crop_failure_recovers(qtbot, labeled_window, monkeypatch):
     window = labeled_window
-    window.controller.detect_petri = lambda image_bgr: PetriInfo(
-        40, 30, 25, (60, 80)
-    )
+    window.controller.detect_petri = lambda image_bgr: PetriInfo(40, 30, 25, (60, 80))
     _select(window)
     qtbot.waitUntil(lambda: window.petri_info is not None, timeout=5000)
 
@@ -139,9 +131,7 @@ def test_crop_failure_recovers(qtbot, labeled_window, monkeypatch):
 
     window.controller.save_mask = broken_save
     window._on_crop()
-    qtbot.waitUntil(
-        lambda: not window._crop_operation.is_running(), timeout=5000
-    )
+    qtbot.waitUntil(lambda: not window._crop_operation.is_running(), timeout=5000)
     assert "Ошибка" in window.status_label.text()
     assert not (window.cropped_dir / "sample_cropped.png").exists()
 
@@ -152,8 +142,10 @@ def test_stale_detect_result_is_dropped(qtbot, labeled_window):
     _select(window)
     qtbot.waitUntil(lambda: window.paint_label._image is not None, timeout=5000)
     qtbot.waitUntil(
-        lambda: window._detect_operation is not None
-        and not window._detect_operation.is_running(),
+        lambda: (
+            window._detect_operation is not None
+            and not window._detect_operation.is_running()
+        ),
         timeout=5000,
     )
     assert window.petri_info is None

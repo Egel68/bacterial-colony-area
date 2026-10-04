@@ -14,7 +14,6 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QImage
 
 from analysis.geometry import PetriInfo
-from analysis.params import AnalysisParams
 from ui.analysis_window import AnalysisWindow
 from ui.controllers.analysis_controller import AnalysisController
 
@@ -60,8 +59,10 @@ def _make_window(qtbot, tmp_path, monkeypatch, size=120):
     qtbot.waitUntil(lambda: not window._analysis_busy, timeout=30000)
     # Представление подготавливается асинхронно (задача 5.3).
     qtbot.waitUntil(
-        lambda: window.image_label.pixmap() is not None
-        and not window.image_label.pixmap().isNull(),
+        lambda: (
+            window.image_label.pixmap() is not None
+            and not window.image_label.pixmap().isNull()
+        ),
         timeout=5000,
     )
     return window
@@ -78,9 +79,7 @@ def _run_save(window, monkeypatch, target):
     window._save_result()
 
 
-def test_save_preserves_snapshot_content_and_dimensions(
-    qtbot, tmp_path, monkeypatch
-):
+def test_save_preserves_snapshot_content_and_dimensions(qtbot, tmp_path, monkeypatch):
     window = _make_window(qtbot, tmp_path, monkeypatch)
     target = tmp_path / "result.png"
 
@@ -91,16 +90,20 @@ def test_save_preserves_snapshot_content_and_dimensions(
     window.view_mode_combo.setCurrentIndex(1)
 
     qtbot.waitUntil(
-        lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         timeout=5000,
     )
     saved = QImage(str(target))
     assert not saved.isNull(), "файл результата не создан"
     assert (saved.width(), saved.height()) == (expected.width(), expected.height())
-    assert saved.convertToFormat(QImage.Format.Format_RGB888) == expected.convertToFormat(
+    assert saved.convertToFormat(
         QImage.Format.Format_RGB888
-    ), "содержимое сохранённого файла не совпало с отображённым видом"
+    ) == expected.convertToFormat(QImage.Format.Format_RGB888), (
+        "содержимое сохранённого файла не совпало с отображённым видом"
+    )
 
 
 def test_save_uses_extension_selected_encoding(qtbot, tmp_path, monkeypatch):
@@ -109,8 +112,10 @@ def test_save_uses_extension_selected_encoding(qtbot, tmp_path, monkeypatch):
         target = tmp_path / name
         _run_save(window, monkeypatch, target)
         qtbot.waitUntil(
-            lambda: window._save_operation is not None
-            and not window._save_operation.is_running(),
+            lambda: (
+                window._save_operation is not None
+                and not window._save_operation.is_running()
+            ),
             timeout=5000,
         )
         header = target.read_bytes()[:2]
@@ -152,8 +157,10 @@ def test_large_image_save_keeps_heartbeat(qtbot, tmp_path, monkeypatch):
 
     _run_save(window, monkeypatch, target)
     qtbot.waitUntil(
-        lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         timeout=30000,
     )
     heartbeat.stop()
@@ -176,8 +183,10 @@ def test_save_failure_is_reported(qtbot, tmp_path, monkeypatch):
     target = "/nonexistent-dir-xyz/result.png"
     _run_save(window, monkeypatch, target)
     qtbot.waitUntil(
-        lambda: window._save_operation is not None
-        and not window._save_operation.is_running(),
+        lambda: (
+            window._save_operation is not None
+            and not window._save_operation.is_running()
+        ),
         timeout=5000,
     )
     assert criticals, "ошибка сохранения не показана"

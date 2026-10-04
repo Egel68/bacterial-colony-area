@@ -159,9 +159,7 @@ class TelemetryCollector:
         with self._lock:
             self._latencies[stage].append(max(0.0, duration))
 
-    def record_logical_io(
-        self, operation: str, byte_count: int, **extra: Any
-    ) -> None:
+    def record_logical_io(self, operation: str, byte_count: int, **extra: Any) -> None:
         """Логическое I/O-событие (задача 2.1): чтение/декодирование.
 
         Отдельно от физических счётчиков ОС: ноль физических read-bytes
@@ -170,7 +168,9 @@ class TelemetryCollector:
         if not self.enabled:
             return
         with self._lock:
-            self._logical_io.setdefault(operation, {"bytes": 0, "calls": 0, "extra": {}})
+            self._logical_io.setdefault(
+                operation, {"bytes": 0, "calls": 0, "extra": {}}
+            )
             entry = self._logical_io[operation]
             entry["bytes"] += max(0, int(byte_count))
             entry["calls"] += 1

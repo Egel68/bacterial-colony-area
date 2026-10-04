@@ -34,6 +34,7 @@ def pattern_bgr():
 
 def _forbid_qpixmap(monkeypatch):
     """Любое обращение к QPixmap во время теста — ошибка."""
+
     class _Forbidden:
         def __init__(self, *args, **kwargs):
             raise AssertionError("QPixmap вызван вне GUI-потока")
@@ -236,7 +237,9 @@ class TestGuiThreadLoadingBehaviorPreserved:
         )
         monkeypatch.setattr(
             "utils.image_loader._load_image_opencv",
-            lambda _p: (_ for _ in ()).throw(AssertionError("OpenCV не должен вызываться")),
+            lambda _p: (_ for _ in ()).throw(
+                AssertionError("OpenCV не должен вызываться")
+            ),
         )
         img = load_image(str(path))
         assert np.array_equal(img, sentinel)

@@ -12,7 +12,7 @@ from .geometry import PetriInfo
 from .image_processor import ImageProcessor
 from .params import AnalysisParams
 from .profiling import measure_stage
-from .sample_context import SampleContext, SampleContextCache
+from .sample_context import SampleContext
 
 
 class ColonyDetector:
@@ -217,9 +217,7 @@ class ColonyDetector:
                 )
 
                 contours = self._find_contours(clean_binary)
-                cv2.drawContours(
-                    clean_binary, contours, -1, 255, thickness=cv2.FILLED
-                )
+                cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
             else:
                 clean_binary = cv2.morphologyEx(
                     clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2

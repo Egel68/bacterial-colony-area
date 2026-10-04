@@ -37,7 +37,9 @@ def _fake_module(output_value=0.9, providers_seen=None, sess_options_seen=None):
 
     return SimpleNamespace(
         InferenceSession=create_session,
-        SessionOptions=lambda: SimpleNamespace(intra_op_num_threads=0, inter_op_num_threads=0),
+        SessionOptions=lambda: SimpleNamespace(
+            intra_op_num_threads=0, inter_op_num_threads=0
+        ),
     )
 
 

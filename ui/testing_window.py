@@ -546,9 +546,7 @@ class TestingWindow(QMainWindow):
     def _on_task_error(self, context: str, error: str):
         # Ошибка отдельной задачи: успешные задачи остаются доступны.
         self._run_errors.append(f"{context}: {error}")
-        self.status_label.setText(
-            f"Ошибка задачи ({len(self._run_errors)}): {context}"
-        )
+        self.status_label.setText(f"Ошибка задачи ({len(self._run_errors)}): {context}")
 
     def _on_progress_made(self, completed: int, total: int):
         if total > 0:
@@ -643,9 +641,9 @@ class TestingWindow(QMainWindow):
     def closeEvent(self, event):
         """Deferred close (задача 7.4): окно показывает «Завершение…» и
         закрывается после safe-точки worker без блокировки GUI-потока."""
-        running = (
-            self._thread is not None and self._thread.isRunning()
-        ) or (self._export_op is not None and self._export_op.is_running())
+        running = (self._thread is not None and self._thread.isRunning()) or (
+            self._export_op is not None and self._export_op.is_running()
+        )
         if not running:
             super().closeEvent(event)
             return
@@ -672,9 +670,9 @@ class TestingWindow(QMainWindow):
     def _maybe_close_after_ops(self):
         if not self._closing:
             return
-        running = (
-            self._thread is not None and self._thread.isRunning()
-        ) or (self._export_op is not None and self._export_op.is_running())
+        running = (self._thread is not None and self._thread.isRunning()) or (
+            self._export_op is not None and self._export_op.is_running()
+        )
         if running:
             return
         self._closing = False

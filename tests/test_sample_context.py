@@ -158,10 +158,18 @@ class TestContextInvalidation:
         expected_b, _ = _detect_independent(detector, fixture, params_b)
 
         result_a, _ = detector.detect_colonies(
-            fixture.image, petri_mask, params=params_a, petri_info=petri_info, context=context
+            fixture.image,
+            petri_mask,
+            params=params_a,
+            petri_info=petri_info,
+            context=context,
         )
         result_b, _ = detector.detect_colonies(
-            fixture.image, petri_mask, params=params_b, petri_info=petri_info, context=context
+            fixture.image,
+            petri_mask,
+            params=params_b,
+            petri_info=petri_info,
+            context=context,
         )
         assert np.array_equal(result_a, expected_a)
         assert np.array_equal(result_b, expected_b)
@@ -203,7 +211,6 @@ class TestContextThreadSafety:
         context.set_geometry(petri_mask, petri_info)
 
         params_a = _params_variant(contrast=1.0)
-        params_b = _params_variant(contrast=1.0)
         expected, _ = _detect_independent(detector, fixture, params_a)
 
         errors = []

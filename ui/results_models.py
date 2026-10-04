@@ -56,9 +56,8 @@ class _BaseResultsModel(QAbstractTableModel):
     ):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
-        if (
-            orientation == Qt.Orientation.Horizontal
-            and 0 <= section < len(self._headers)
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(
+            self._headers
         ):
             return self._headers[section]
         return None

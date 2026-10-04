@@ -29,9 +29,7 @@ def window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         lw.QMessageBox, "information", staticmethod(lambda *a, **k: None)
     )
-    monkeypatch.setattr(
-        lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None)
-    )
+    monkeypatch.setattr(lw.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
         lw.QMessageBox,
         "question",
@@ -67,8 +65,10 @@ def test_close_during_uninterruptible_export_defers_and_closes_later(
     )
     target = _start_export(window, monkeypatch, tmp_path)
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and window._export_operation.is_running()
+        ),
         timeout=5000,
     )
 
@@ -92,8 +92,10 @@ def test_new_work_stops_during_closing(qtbot, window, monkeypatch, tmp_path):
     window.controller.export_session_to_zip = lambda *a, **k: time.sleep(0.3)
     _start_export(window, monkeypatch, tmp_path)
     qtbot.waitUntil(
-        lambda: window._export_operation is not None
-        and window._export_operation.is_running(),
+        lambda: (
+            window._export_operation is not None
+            and window._export_operation.is_running()
+        ),
         timeout=5000,
     )
     window.close()
@@ -145,8 +147,9 @@ def test_close_during_cooperative_copy_cancels_and_closes(
     )
     window._on_add_images()
     qtbot.waitUntil(
-        lambda: window._copy_operation is not None
-        and window._copy_operation.is_running(),
+        lambda: (
+            window._copy_operation is not None and window._copy_operation.is_running()
+        ),
         timeout=5000,
     )
     qtbot.wait(120)

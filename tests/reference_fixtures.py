@@ -69,9 +69,7 @@ class ReferenceFixture:
 # ----------------------------------------------------------------------------
 
 
-def _base_canvas(
-    size: Tuple[int, int], rng: np.random.RandomState
-) -> np.ndarray:
+def _base_canvas(size: Tuple[int, int], rng: np.random.RandomState) -> np.ndarray:
     """Тёмное поле с лёгким детерминированным шумом (как на dark-field фото)."""
     h, w = size
     noise = rng.randint(26, 43, (h, w)).astype(np.uint8)

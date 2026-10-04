@@ -48,6 +48,7 @@ class _ErrorItem:
     def __init__(self, exc: BaseException):
         self.exc = exc
 
+
 # Таймаут ожидания в блокирующих циклах producer/consumer (сек).
 _POLL_INTERVAL = 0.05
 
@@ -222,11 +223,7 @@ class PrefetchLoader(Iterator):
                 thread = self._thread
                 if self._producer_error is not None and self._queue.empty():
                     raise self._producer_error
-                if (
-                    thread is not None
-                    and not thread.is_alive()
-                    and self._queue.empty()
-                ):
+                if thread is not None and not thread.is_alive() and self._queue.empty():
                     raise StopIteration
         wait_time = time.perf_counter() - wait_started
         now = time.perf_counter()
