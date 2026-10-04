@@ -113,6 +113,8 @@ jobs:
 
       - name: Run tests (Linux)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           sudo apt-get install -y libegl1
           uv run python -m pytest tests/ \
