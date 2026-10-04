@@ -350,25 +350,52 @@ evaluations/2026-09-15_19-44-10/
 (битый файл) не роняет прогон: ошибка попадает в лог и телеметрию, сэмпл
 пропускается.
 
-### Число потоков
+### Ресурсная политика и число потоков
 
-`_effective_workers(requested, task_count, memory_budget, batch_bytes)`:
+Число workers координируется через `testing/resource_policy.py` и
+`testing/scheduler.py`, чтобы учитывать не только внешние algorithm tasks, но и
+декодирование и внутренние пулы OpenCV/ONNX Runtime.
 
-- при `workers=None` берётся число **физических** ядер (`psutil.cpu_count(logical=False)`);
-- при заданном `--memory-budget` число ядер дополнительно ограничивается
-  `available_memory // memory_budget`;
-- итог ограничен числом задач в батче и никогда не меньше 1;
-- `--workers 0` или отрицательное значение → `ValueError`.
+- Видимая CPU-ёмкость — консервативный минимум известных ограничений процесса:
+  affinity, cgroup CPU quota и физические CPU хоста. Если информацию получить
+  нельзя, используется консервативный fallback.
+- `resolve_resource_policy` распределяет ёмкость между algorithm workers,
+  decode workers и native threads. В interactive-режиме оставляется запас для
+  GUI event loop.
+- `--workers N` — верхняя граница, не обещанное фактическое число потоков;
+  итог также ограничен задачами, CPU-ёмкостью и памятью. `workers <= 0` ведёт
+  к `ValueError`.
+- `_effective_workers` дополнительно ограничивает конкурентные задачи при
+  заданном `memory_budget`; адаптивное снижение может выдать `workers_reduced`
+  при давлении ресурсов.
 
-Адаптивное уменьшение: если `batch_bytes > memory_budget` либо сумма двух
-последних `queue_wait` вдвое превышает сумму двух последних `detect`, число
-потоков уменьшается вдвое (`workers_reduced` в телеметрии).
+**Важно:** concurrency — настройка/предел планирования, а не доказательство
+ускорения. Сравнивайте end-to-end время и throughput на одном наборе, проверяя
+идентичность результатов и память. Зафиксированный warm-cache acceptance
+workload дал одинаковые SHA-256 результатов, но automatic режим оказался
+примерно в 3.16 раза медленнее последовательного; cold-storage physical I/O
+не измерялся. Это ограниченное измерение, не утверждение об ускорении или
+замедлении всех машин и алгоритмов.
 
-**Важно:** параллельно работают только алгоритмы, зарегистрированные как
-**классы** (то есть классика) — каждому потоку достаётся свой экземпляр.
-NN-модели зарегистрированы как экземпляры и вызываются под общим
-`threading.Lock` строго последовательно, поскольку одна ONNX-сессия не должна
-работать из нескольких потоков одновременно.
+Реестровые **экземпляры** (включая текущие `NN:*`) по-прежнему защищены
+именованным `threading.Lock` и исполняются последовательно; зарегистрированные
+**классы** получают отдельные экземпляры на поток. Координация нативных thread
+pools не снимает это ограничение для instance-алгоритмов и не обещает, что
+увеличение `--workers` распараллелит вызов одной ONNX-сессии.
+
+### Перекрытие decode и compute
+
+`iter_batches` готовит bounded batches, а `PrefetchLoader` держит максимум один
+prefetched batch по умолчанию и перекрывает его decode с compute текущего.
+Ограничения очереди и памяти действуют совместно (backpressure). Для
+`memory_budget` 25% резерва оставляется под временные буферы алгоритмов;
+decoded-input target не является жёстким лимитом RSS. Если одна пара превышает
+бюджет, она обрабатывается отдельно, а не отбрасывается. Ошибка пары не должна
+терять прочие допустимые пары.
+
+`input_starvation` измеряет долю активных compute worker-slot-seconds, когда
+готовый compute slot ожидал пустую input queue; старт/финиш и намеренное ожидание
+сериализованного algorithm lane исключаются из этого числителя.
 
 ### Два независимых кэша
 
@@ -397,10 +424,31 @@ NN-модели зарегистрированы как экземпляры и 
 | `performance.json` (путь из `--performance-output`) | Итоговая сводка: стадии с перцентилями, счётчики, ошибки, число сериализованных вызовов |
 | `performance.jsonl` | Поток событий: `batch_started`, `batch_loaded`, `workers_reduced`, `memory_budget_exceeded`, снапшоты очереди с интервалом `--telemetry-interval` |
 
-Отслеживаемые стадии: `load`, `queue_wait`, `cache`, `detect`, `metrics`,
-`report`. Это основной инструмент, чтобы понять, куда уходит время: если
-`queue_wait` заметно больше `detect`, потоков слишком много или они
-конкурируют за память.
+Отслеживаемые стадии включают `file_read` (логическое чтение сжатых файлов),
+`image_decode` (декодирование), `input_wait` (ожидание входа вычислителем),
+`queue_wait` (ожидание отправленной задачи), `cache`, `detect`, `metrics` и
+`report`. Telemetry также записывает logical I/O bytes, доступность CPU
+(logical/physical count, affinity, quota), worker/native-thread limits, process
+CPU time/cores consumed, текущую/пиковую RSS, input-starvation и capability
+системных I/O-счётчиков. Если OS counters недоступны, они остаются неизвестными;
+ноль physical read bytes может означать чтение из OS page cache, а не отсутствие
+чтения или задержки.
+
+### Измерения и границы выводов
+
+Reference heartbeat-тесты проверяют, что Qt event loop продолжает обрабатывать
+timer и пользовательские события во время длительной фоновой CPU-bound работы.
+Латентность зависит от платформы и внешней нагрузки; за пределами зафиксированного
+reference-профиля тест подтверждает отсутствие синхронной длительной работы в GUI,
+а не универсальную численную гарантию.
+
+Performance acceptance публикует последовательный и автоматический/ограниченно
+параллельный прогоны с одним и тем же входом, digest результатов, end-to-end
+wall/CPU time, throughput, RSS и input-starvation. Не следует выводить ускорение
+из увеличенного worker count или меньшего starvation: для зафиксированного
+warm-cache classic workload совпадение результатов было достигнуто, однако auto
+режим был ~3.16x медленнее sequential. Холодное хранилище и физические дисковые
+чтения этим benchmark не измерены.
 
 ---
 
@@ -465,9 +513,13 @@ testing/
 ├── tiled_onnx_algorithm.py# TiledOnnxModelAlgorithm, tile_positions — полное разрешение
 ├── metrics.py             # compute_segmentation_metrics (6 метрик + tp/fp/fn/tn)
 ├── statistics.py          # описательная статистика, Wilcoxon, доли побед, выбросы
-├── scheduler.py           # execute_pipeline: батчи + ThreadPoolExecutor + кэш
+├── scheduler.py           # execute_pipeline: CPU-aware, memory-bounded pipeline
+├── pipeline_overlap.py    # bounded decode prefetch, backpressure, input-starvation
+├── resource_policy.py     # algorithm/decode/native CPU budget coordination
+├── pipeline_observer.py   # progress phases, task diagnostics and cancellation
+├── profiling.py           # контекстное измерение стадий
 ├── cache.py               # сигнатура датасета, PredictionCache (маски в PNG)
-├── telemetry.py           # TelemetryCollector: performance.json + .jsonl
+├── telemetry.py           # CPU/RSS/I/O/stage telemetry: performance.json + .jsonl
 ├── dataset.py             # TestDataset: пары source/ + masks/ (+ cropped)
 ├── baseline.py            # BaselineDataset (manifest/legacy/importer) + run_baseline + export_json
 ├── runner.py              # run_all, агрегация, Wilcoxon-таблица, выбросы, доли побед
@@ -488,12 +540,14 @@ analysis/                    # слой предметной области, и�
 
 ```
 TestDataset | BaselineDataset
-  → scheduler._sample_refs → iter_batches (лимит по числу и байтам)
-  → ThreadPoolExecutor: задача = (сэмпл × алгоритм)
-      → PredictionCache.get_array → [_AlgorithmRuntime.detect] → put_array
+  → scheduler._sample_refs → iter_batches (batch + decoded-input memory target)
+  → PrefetchLoader (bounded decode producer + backpressure; decode/compute overlap)
+  → ThreadPoolExecutor: задача = (sample × algorithm), shared CPU/native policy
+      → SampleContext / PredictionCache.get_array → [_AlgorithmRuntime.detect] → put_array
       → compute_segmentation_metrics
-  → агрегация (compute_summary / wilcoxon / outliers / winners)
-  → dashboard.generate_report  |  export_json + evaluator._generate_eval_html
+  → PipelineObserver phases/progress/errors + structured telemetry
+  → aggregation (compute_summary / wilcoxon / outliers / winners)
+  → dashboard.generate_report | export_json + evaluator._generate_eval_html
 ```
 
 Подробности: [scheduler](architecture.md#64-планировщик-testingschedulerpy),

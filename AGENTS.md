@@ -30,8 +30,11 @@ uv run bacteria-analyzer
 **Назначение:** автоматический подсчёт колоний бактерий на изображении чашки Петри.
 
 В окне анализа можно выбрать классический режим или зарегистрированный алгоритм.
-Новая MobileNet ONNX-модель работает на CPU по полноразмерным перекрывающимся
-тайлам; во время её работы окно показывает прогресс.
+Загрузка и анализ (включая классический пересчёт и поиск чашки) выполняются в
+фоне; окно остаётся отзывчивым и показывает состояние/прогресс. Новая MobileNet
+ONNX-модель работает на CPU по полноразмерным перекрывающимся тайлам; во время
+её работы окно показывает прогресс. Переключение вида/сохранение больших кадров
+также не должно блокировать GUI.
 Обучение MobileNet выполняется на CUDA, если доступна GPU; ONNX-инференс приложения
 остаётся CPU-only через ONNX Runtime `CPUExecutionProvider`.
 
@@ -40,6 +43,8 @@ uv run bacteria-analyzer
 1. Нажмите «📂 Открыть» и выберите изображение чашки Петри (поддерживаются PNG, JPG, BMP, TIFF, WebP).
 2. Нажмите «🔍 Анализировать».
 3. Откроется окно анализа с изображением и панелью параметров.
+
+При отмене или закрытии окна выполняющаяся операция прекращает следующие этапы на ближайшей безопасной точке; неотменяемый OpenCV/ONNX native-вызов может завершиться естественно. Окно показывает состояние завершения и не блокирует обработку GUI-событий.
 
 **Параметры анализа:**
 
@@ -81,6 +86,13 @@ uv run bacteria-analyzer
 ### 2.2. Разметка изображений (Labeling)
 
 **Назначение:** ручное создание ground-truth масок для обучения и тестирования алгоритмов.
+
+Список файлов, чтение/декодирование, авто-поиск чашки, обрезка, копирование,
+сохранение маски и экспорт ZIP выполняются в фоне с состоянием операции. При
+смене выделения устаревший результат не применяется; рисование по большому
+изображению обновляет только изменённую область. Отмена и закрытие активной
+операции кооперативны: уже выполняемый native-вызов может завершиться до
+безопасной точки, при этом GUI остаётся отзывчивым.
 
 #### 2.2.1. Начало сессии разметки
 
@@ -229,19 +241,16 @@ uv run augment
 
 Результат: `train/data/images/` + `train/data/masks/` (по ~15 файлов на каждый исходник).
 
-### 2.5. Обучение U-Net (CLI, требуется dev-окружение)
+### 2.5. Обучение U-Net (CLI, требуется full-окружение)
 
 **Назначение:** обучение нейросетевой сегментации колоний.
 
 ```bash
-# Установка dev-окружения (~5 ГБ, включает torch + CUDA)
-UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev
-
-# Активация dev-окружения
-source .venv-dev/bin/activate
+# Установка full-окружения с PyTorch/обучающими зависимостями
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
 
 # Запуск обучения
-UV_PROJECT_ENVIRONMENT=.venv-dev uv run python -m train.main train --model unet --epochs 200 --dashboard
+UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train --model unet --epochs 200 --dashboard
 ```
 
 **Параметры `train.main train`:**
@@ -407,11 +416,11 @@ bash scripts/build_nuitka.sh
 
 Файл `.github/workflows/build.yaml`:
 
-- **Триггеры:** push в `develop`/`main`/`feature/*`, PR в `develop`
-- **Матрица:** ubuntu-latest + windows-latest
-- **Python:** 3.13 (через `uv`)
-- **Windows:** MSVC, отключена консоль, иконка `icon.ico`
-- **Артефакты:** загружаются в GitHub Actions
+- **Триггеры:** PR (`opened`, `synchronize`, `reopened`) в `develop`, push в `main`/`master`, ручной `workflow_dispatch`. Push в `develop` и feature-ветки самостоятельно workflow не запускает.
+- **Матрица:** ubuntu-latest + windows-latest; отдельный `required-ci` контролирует обязательность матрицы.
+- **Python:** 3.13 через `uv`.
+- **Проверки:** Ruff lint/format, тесты без slow/gui на обоих runners, GUI worker tests offscreen на Windows, Nuitka build и CPU inference smoke checks.
+- **Артефакты:** бинарники для платформ; Linux JUnit pytest report. Изменения только под `openspec/` пропускают build matrix.
 
 ---
 
@@ -481,9 +490,8 @@ bash scripts/build_nuitka.sh
 
 ---
 
-## 7. Что НЕ настроено
+## 7. Проверки и ограничения разработки
 
-- Нет тестов (unit/integration)
-- Нет линтера, typechecker, форматтера
-- Нет pre-commit хуков
-- CI не проверяет качество кода
+- В репозитории есть unit, integration и GUI-тесты под pytest; часть тестов помечена `slow`/`gui` и не входит в обычный CI-набор.
+- CI проверяет Ruff lint и форматирование, запускает тесты `not slow and not gui` на Linux/Windows и отдельные GUI worker tests offscreen на Windows, затем собирает бинарники и выполняет CPU inference smoke checks.
+- Обязательного typechecker и pre-commit hooks сейчас нет.

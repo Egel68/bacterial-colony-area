@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -6,6 +7,11 @@ import numpy as np
 from .dataset import TestDataset
 from .interface import BaseDetectionAlgorithm
 from .metrics import compute_segmentation_metrics
+from .pipeline_observer import (
+    PHASE_COMPARISON,
+    PHASE_RESULT_PREPARATION,
+    PipelineObserver,
+)
 from .registry import list_algorithms, get_algorithm_descriptions
 from .scheduler import PipelineDiagnostics, execute_pipeline
 from .telemetry import TelemetryCollector
@@ -135,23 +141,20 @@ def run_all(
     )
 
 
-def compare_algorithms(
-    dataset: TestDataset, name_a: str, name_b: str
+def build_comparison(
+    results_a: Dict[str, Dict[str, Dict[str, float]]],
+    results_b: Dict[str, Dict[str, Dict[str, float]]],
 ) -> Dict[str, Dict[str, Dict[str, str]]]:
-    """Парное сравнение алгоритмов A и B по снимкам.
+    """Строит парное сравнение A vs B по уже вычисленным метрикам.
 
     Возвращает вложенный словарь:
       comparison[metric][sample_key][variant] = "a" | "b" | "tie"
     """
-    compared = execute_pipeline(dataset, [name_a, name_b], workers=1)
-    results_a = compared.get(name_a, {})
-    results_b = compared.get(name_b, {})
-
     comparison: Dict[str, Dict[str, Dict[str, str]]] = {}
     metric_names = ["iou", "dice", "f1", "precision", "recall", "accuracy"]
 
     for sample_key in results_a:
-        variants = set(results_a[sample_key]) & set(results_b[sample_key])
+        variants = set(results_a[sample_key]) & set(results_b.get(sample_key, {}))
         for variant in variants:
             metrics_a = results_a[sample_key][variant]
             metrics_b = results_b[sample_key][variant]
@@ -163,6 +166,99 @@ def compare_algorithms(
                 ] = "a" if va > vb else ("b" if vb > va else "tie")
 
     return comparison
+
+
+def run_all_with_comparison(
+    dataset: TestDataset,
+    algorithms: Optional[List[str]] = None,
+    compare_pair: Optional[tuple[str, str]] = None,
+    workers: Optional[int] = None,
+    use_cache: bool = False,
+    batch_size: int = 8,
+    memory_budget: int | None = None,
+    telemetry: TelemetryCollector | None = None,
+    diagnostics: PipelineDiagnostics | None = None,
+    observer: Optional[PipelineObserver] = None,
+    cancel_event: Optional["threading.Event"] = None,
+) -> tuple[AllResults, Optional[Dict[str, Dict[str, Dict[str, str]]]]]:
+    """Прогон + парное сравнение без повторных детекций (задача 3.4).
+
+    Каждая требуемая пара «алгоритм × sample × variant» вычисляется не более
+    одного раза: сравнение строится из результатов основного прогона. Если
+    сравниваемый алгоритм не входит в отображаемое подмножество, он
+    вычисляется дополнительно один раз и НЕ попадает в `all_results`.
+
+    `observer` (задача 7.1) получает фазы конвейера (dataset_scan,
+    read_decode, algorithm, comparison, result_preparation) и контекстные
+    ошибки отдельных задач.
+    """
+    if algorithms is None:
+        names = list_algorithms()
+    else:
+        names = list(algorithms)
+
+    run_names = list(names)
+    missing_compare: list[str] = []
+    if compare_pair:
+        for compare_name in compare_pair:
+            if compare_name not in run_names:
+                run_names.append(compare_name)
+                missing_compare.append(compare_name)
+
+    if not run_names:
+        return {}, None
+
+    log.info(
+        "Running %d algorithm(s) with workers=%s, batch_size=%d "
+        "(compare=%s, extra for comparison=%s)",
+        len(run_names),
+        workers or "auto",
+        batch_size,
+        compare_pair or "-",
+        missing_compare or "-",
+    )
+    full_results = execute_pipeline(
+        dataset,
+        run_names,
+        workers=workers,
+        batch_size=batch_size,
+        memory_budget=memory_budget,
+        use_cache=use_cache,
+        telemetry=telemetry,
+        diagnostics=diagnostics,
+        observer=observer,
+        cancel_event=cancel_event,
+    )
+
+    # Отображаемый набор алгоритмов сохраняется: лишние результаты скрыты.
+    all_results: AllResults = {name: full_results.get(name, {}) for name in names}
+
+    comparison = None
+    if compare_pair:
+        name_a, name_b = compare_pair
+        if observer is not None:
+            observer.on_phase(PHASE_COMPARISON)
+        comparison = build_comparison(
+            full_results.get(name_a, {}), full_results.get(name_b, {})
+        )
+    if observer is not None:
+        observer.on_phase(PHASE_RESULT_PREPARATION)
+    return all_results, comparison
+
+
+def compare_algorithms(
+    dataset: TestDataset, name_a: str, name_b: str
+) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """Парное сравнение алгоритмов A и B по снимкам (отдельный прогон).
+
+    Возвращает вложенный словарь:
+      comparison[metric][sample_key][variant] = "a" | "b" | "tie"
+
+    Для сравнения внутри общего прогона используйте
+    `run_all_with_comparison` — он не повторяет детекции.
+    """
+    compared = execute_pipeline(dataset, [name_a, name_b], workers=1)
+    return build_comparison(compared.get(name_a, {}), compared.get(name_b, {}))
 
 
 def compute_summary(all_results: AllResults) -> List[Dict]:

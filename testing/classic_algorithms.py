@@ -17,9 +17,20 @@ class _ClassicBase(BaseDetectionAlgorithm):
     def __init__(self):
         self.detector = ColonyDetector()
 
-    def detect(self, image: np.ndarray, is_cropped: bool = False) -> np.ndarray:
+    def detect(
+        self,
+        image: np.ndarray,
+        is_cropped: bool = False,
+        context=None,
+    ) -> np.ndarray:
         h, w = image.shape[:2]
-        if is_cropped:
+
+        # Геометрия чашки инвариантна для одного снимка/варианта: при
+        # совместимом контексте переиспользуется (задача 3.3).
+        geometry = context.get_geometry() if context is not None else None
+        if geometry is not None:
+            petri_mask, petri_info = geometry
+        elif is_cropped:
             center = (w // 2, h // 2)
             radius = min(w, h) // 2
             petri_info = PetriInfo(
@@ -30,6 +41,8 @@ class _ClassicBase(BaseDetectionAlgorithm):
             )
             petri_mask = np.zeros((h, w), dtype=np.uint8)
             cv2.circle(petri_mask, center, radius, 255, -1)
+            if context is not None:
+                context.set_geometry(petri_mask, petri_info)
         else:
             petri_mask, petri_info = self.detector.detect_petri_dish(image)
             if petri_info is None:
@@ -43,12 +56,15 @@ class _ClassicBase(BaseDetectionAlgorithm):
                 )
                 petri_mask = np.zeros((h, w), dtype=np.uint8)
                 cv2.circle(petri_mask, center, radius, 255, -1)
+            if context is not None:
+                context.set_geometry(petri_mask, petri_info)
 
         colony_mask, _ = self.detector.detect_colonies(
             image,
             petri_mask,
             params=self.params,
             petri_info=petri_info,
+            context=context,
         )
         return colony_mask
 

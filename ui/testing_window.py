@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+import threading
 
 from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -24,22 +25,27 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from testing.baseline import BaselineDataset
-from testing.dashboard import generate_report
+from testing.dashboard import generate_report_atomic
 from testing.onnx_algorithm import OnnxModelAlgorithm
 from testing.registry import (
     list_algorithms,
     register_algorithm_instance,
 )
-from testing.runner import run_all, compare_algorithms
+from testing.pipeline_observer import PipelineObserver
+from testing.runner import run_all_with_comparison
 from testing.scheduler import PipelineDiagnostics
 from testing.telemetry import TelemetryCollector
+from ui.background import BackgroundOperation, snapshot
+from .results_models import (
+    ComparisonTableModel,
+    ResultsTableView,
+    SummaryTableModel,
+)
 from .responsive import install_application_responsive_sizing
 
 
@@ -77,11 +83,32 @@ def _limit_gui_dataset(dataset, sample_limit: int | None):
     return _DatasetView(dataset.root, samples)
 
 
+class _QtPipelineObserver(PipelineObserver):
+    """Мост: события конвейера → Qt-сигналы окна (задача 7.1)."""
+
+    def __init__(self, worker: "_RunWorker"):
+        super().__init__()
+        self._worker = worker
+
+    def on_phase(self, phase: str, **context) -> None:
+        self._worker.phase_changed.emit(phase)
+
+    def on_task_error(self, context: str, error: str) -> None:
+        self._worker.task_error.emit(context, error)
+
+    def on_progress(self, completed: int, total: int) -> None:
+        self._worker.progress_made.emit(completed, total)
+
+
 class _RunWorker(QObject):
     """Выполняет прогон алгоритмов в фоновом потоке."""
 
     finished = pyqtSignal(dict, dict)
     failed = pyqtSignal(str)
+    # Фазы конвейера и контекстные per-task ошибки (задача 7.1).
+    phase_changed = pyqtSignal(str)
+    task_error = pyqtSignal(str, str)
+    progress_made = pyqtSignal(int, int)
 
     def __init__(
         self,
@@ -101,6 +128,12 @@ class _RunWorker(QObject):
         self.batch_size = batch_size
         self.workers = workers
         self.telemetry_enabled = telemetry
+        # Кооперативная отмена (задача 7.4): новые задачи не ставятся
+        # после cancel() на ближайшей safe-границе конвейера.
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self):
         try:
@@ -140,13 +173,16 @@ class _RunWorker(QObject):
                 output_path=performance_output,
             )
             diagnostics = PipelineDiagnostics()
-            all_results = run_all(
+            all_results, comparison = run_all_with_comparison(
                 dataset,
                 algorithms=self.algorithm_names,
+                compare_pair=self.compare_pair,
                 workers=self.workers,
                 batch_size=self.batch_size,
                 telemetry=telemetry,
                 diagnostics=diagnostics,
+                observer=_QtPipelineObserver(self),
+                cancel_event=self._cancel_event,
             )
             if not any(
                 sample_results
@@ -171,11 +207,6 @@ class _RunWorker(QObject):
                         f"Проверьте модели и параметры алгоритмов.{suffix}"
                     )
                 return
-
-            comparison = None
-            if self.compare_pair:
-                name_a, name_b = self.compare_pair
-                comparison = compare_algorithms(dataset, name_a, name_b)
 
             summary = []
             for entry_name in all_results:
@@ -217,6 +248,8 @@ class TestingWindow(QMainWindow):
         self._results = None
         self._worker = None
         self._thread = None
+        self._export_op = None
+        self._closing = False
 
         self._init_ui()
         self._responsive_sizer = install_application_responsive_sizing(
@@ -324,6 +357,10 @@ class TestingWindow(QMainWindow):
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self._export_report)
         run_row.addWidget(self.btn_export)
+        self.btn_cancel = QPushButton("⏹ Отменить")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.clicked.connect(self._cancel_run)
+        run_row.addWidget(self.btn_cancel)
         run_layout.addLayout(run_row)
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -332,24 +369,22 @@ class TestingWindow(QMainWindow):
         run_layout.addWidget(self.status_label)
         root_layout.addWidget(run_group)
 
-        # --- Результаты ---
+        # --- Результаты (model/view: ячейки не создают GUI-элементы) ---
         results_group = QGroupBox("📊 Результаты")
         results_layout = QVBoxLayout(results_group)
-        self.table = QTableWidget(0, 6)
+        self.table = ResultsTableView()
         self.table.setMinimumSize(0, 0)
-        self.table.setHorizontalHeaderLabels(
-            ["Алгоритм", "IoU", "Dice", "F1", "Precision", "Recall"]
-        )
+        self.summary_model = SummaryTableModel(self)
+        self.table.setModel(self.summary_model)
         self.table.setColumnWidth(0, 260)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
         results_layout.addWidget(self.table)
-        self.comparison_table = QTableWidget(0, 3)
+        self.comparison_table = ResultsTableView()
         self.comparison_table.setMinimumSize(0, 0)
-        self.comparison_table.setHorizontalHeaderLabels(
-            ["Снимок", "Variant", "Победитель"]
-        )
+        self.comparison_model = ComparisonTableModel(self)
+        self.comparison_table.setModel(self.comparison_model)
         self.comparison_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
@@ -454,6 +489,7 @@ class TestingWindow(QMainWindow):
 
         self.btn_run.setEnabled(False)
         self.btn_export.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
         self.progress.setVisible(True)
         self.progress.setValue(0)
         self.status_label.setText("Запуск прогона…")
@@ -474,67 +510,170 @@ class TestingWindow(QMainWindow):
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.phase_changed.connect(self._on_phase_changed)
+        self._worker.task_error.connect(self._on_task_error)
+        self._worker.progress_made.connect(self._on_progress_made)
+        self._run_errors = []
         self._thread.finished.connect(lambda: self.progress.setValue(100))
         self._thread.start()
 
+    def _cancel_run(self):
+        """Кооперативная отмена прогона/экспорта (задача 7.4).
+
+        Новые задачи прекращают ставиться на ближайшей safe-границе;
+        уже выполняющийся native-вызов не прерывается и не блокирует
+        GUI-поток.
+        """
+        if self._worker is not None:
+            self._worker.cancel()
+        if self._export_op is not None and self._export_op.is_running():
+            self._export_op.cancel()
+        self.btn_cancel.setEnabled(False)
+        self.status_label.setText("⏳ Отмена… Ожидание безопасной точки.")
+
+    # Человекочитаемые названия фаз конвейера (задача 7.1).
+    _PHASE_LABELS = {
+        "dataset_scan": "Сканирование датасета…",
+        "read_decode": "Чтение и декодирование пар…",
+        "algorithm": "Вычисление алгоритмов…",
+        "comparison": "Парное сравнение алгоритмов…",
+        "result_preparation": "Подготовка результатов…",
+    }
+
+    def _on_phase_changed(self, phase: str):
+        self.status_label.setText(self._PHASE_LABELS.get(phase, phase))
+
+    def _on_task_error(self, context: str, error: str):
+        # Ошибка отдельной задачи: успешные задачи остаются доступны.
+        self._run_errors.append(f"{context}: {error}")
+        self.status_label.setText(f"Ошибка задачи ({len(self._run_errors)}): {context}")
+
+    def _on_progress_made(self, completed: int, total: int):
+        if total > 0:
+            self.progress.setMaximum(total)
+            self.progress.setValue(min(completed, total))
+
     def _on_finished(self, results, extra):
+        if self._closing:
+            # Поздние результаты не применяются после запроса закрытия (7.4).
+            return
         self._results = results
         self._fill_table(extra["summary"])
         if extra.get("comparison"):
             self._fill_comparison(extra["comparison"])
         self.btn_run.setEnabled(True)
         self.btn_export.setEnabled(True)
-        self.status_label.setText("Готово. Прогон завершён.")
+        self.btn_cancel.setEnabled(False)
+        error_count = len(getattr(self, "_run_errors", []))
+        if error_count:
+            self.status_label.setText(
+                f"Готово. Прогон завершён (ошибок задач: {error_count})."
+            )
+        else:
+            self.status_label.setText("Готово. Прогон завершён.")
 
     def _on_failed(self, message: str):
+        if self._closing:
+            return
         self.btn_run.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
         self.status_label.setText("Ошибка прогона.")
         QMessageBox.critical(self, "Ошибка прогона", message)
 
     def _fill_table(self, summary):
-        self.table.setRowCount(len(summary))
-        for row, entry in enumerate(summary):
-            self.table.setItem(row, 0, QTableWidgetItem(entry["name"]))
-            m = entry["metrics"]
-            for col, key in enumerate(("iou", "dice", "f1", "precision", "recall")):
-                self.table.setItem(
-                    row, col + 1, QTableWidgetItem(f"{m.get(key, 0):.4f}")
-                )
+        # Model/view: данные уходят в модель, ячейки рисует делегат —
+        # без создания GUI-элемента на каждую ячейку (задача 7.2).
+        self.summary_model.set_summary(summary)
 
     def _fill_comparison(self, comparison):
-        rows = []
-        for metric_name, samples in sorted(comparison.items()):
-            for sample_key, variants in sorted(samples.items()):
-                for variant, winner in sorted(variants.items()):
-                    rows.append((f"{metric_name} · {sample_key}", variant, winner))
-        self.comparison_table.setRowCount(len(rows))
-        for row, (sample, variant, winner) in enumerate(rows):
-            self.comparison_table.setItem(row, 0, QTableWidgetItem(sample))
-            self.comparison_table.setItem(row, 1, QTableWidgetItem(variant))
-            self.comparison_table.setItem(row, 2, QTableWidgetItem(winner))
-        self.comparison_table.setVisible(len(rows) > 0)
+        self.comparison_model.set_comparison(comparison)
+        self.comparison_table.setVisible(self.comparison_model.rowCount() > 0)
 
     def _export_report(self):
         if self._results is None:
+            return
+        if self._export_op is not None and self._export_op.is_running():
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Сохранить отчёт", "test_report.html", "HTML reports (*.html)"
         )
         if not path:
             return
-        try:
-            generate_report(
-                self._results,
-                output_path=path,
-                include_per_snapshot=self.chk_per_snapshot.isChecked(),
+        # Стабильный снимок результатов: генерация идёт вне GUI-потока (7.3),
+        # публикация по финальному пути — только при успехе (атомарно).
+        results_snapshot = snapshot(self._results)
+        include_per_snapshot = self.chk_per_snapshot.isChecked()
+
+        def export_work(ctx, results, output_path, per_snapshot):
+            ctx.status("Генерация HTML-отчёта…")
+            return generate_report_atomic(
+                results,
+                output_path,
+                include_per_snapshot=per_snapshot,
+                publish_check=ctx.checkpoint,
             )
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.critical(self, "Ошибка экспорта", str(e))
-            return
-        self.status_label.setText(f"Отчёт сохранён: {path}")
+
+        self._export_op = BackgroundOperation(export_work, parent=self)
+        self._export_op.status_changed.connect(self.status_label.setText)
+        self._export_op.result_ready.connect(self._on_export_finished)
+        self._export_op.error_raised.connect(self._on_export_failed)
+        self._export_op.start(
+            results_snapshot,
+            path,
+            include_per_snapshot,
+            copy_inputs=False,  # снимок уже скопирован выше
+        )
+        self.btn_export.setEnabled(False)
+        self.btn_run.setEnabled(False)
+        self.status_label.setText("Генерация HTML-отчёта…")
+
+    def _on_export_finished(self, published_path, generation):
+        self.btn_export.setEnabled(True)
+        self.btn_run.setEnabled(True)
+        self.status_label.setText(f"Отчёт сохранён: {published_path}")
+
+    def _on_export_failed(self, message, generation):
+        self.btn_export.setEnabled(True)
+        self.btn_run.setEnabled(True)
+        self.status_label.setText("Ошибка экспорта.")
+        QMessageBox.critical(self, "Ошибка экспорта", message)
 
     def closeEvent(self, event):
+        """Deferred close (задача 7.4): окно показывает «Завершение…» и
+        закрывается после safe-точки worker без блокировки GUI-потока."""
+        running = (self._thread is not None and self._thread.isRunning()) or (
+            self._export_op is not None and self._export_op.is_running()
+        )
+        if not running:
+            super().closeEvent(event)
+            return
+        event.ignore()
+        if self._closing:
+            return  # уже ждём безопасную точку
+        self._closing = True
+        self.status_label.setText(
+            "⏳ Завершение… Окно закроется после завершения операций."
+        )
+        # Кооперативная отмена; native-вызовы доработают сами.
+        if self._worker is not None:
+            self._worker.cancel()
+        if self._export_op is not None and self._export_op.is_running():
+            self._export_op.cancel()
         if self._thread is not None and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(2000)
-        super().closeEvent(event)
+            self._thread.finished.connect(self._maybe_close_after_ops)
+        if self._export_op is not None:
+            self._export_op.close_reached.connect(self._maybe_close_after_ops)
+            self._export_op.request_close()
+        if self._thread is None or not self._thread.isRunning():
+            self._maybe_close_after_ops()
+
+    def _maybe_close_after_ops(self):
+        if not self._closing:
+            return
+        running = (self._thread is not None and self._thread.isRunning()) or (
+            self._export_op is not None and self._export_op.is_running()
+        )
+        if running:
+            return
+        self._closing = False
+        self.close()

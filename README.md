@@ -50,15 +50,16 @@
 
 **Анализ колоний.** Автопоиск чашки Петри (отражения → окружность), расчёт маски
 колоний, число колоний, покрытие рабочей зоны и площадь в пикселях, интерактивная
-настройка параметров с мгновенным пересчётом.
+настройка параметров. Загрузка, классический/NN-пересчёт и подготовка большого
+изображения выполняются в фоне с сохранением отзывчивости окна.
 
 **Нейросетевая сегментация.** Две встроенные ONNX-модели доступны прямо из окна анализа
 как отдельные алгоритмы; MobileNetV3-Small обрабатывает снимок целиком
 перекрывающимися тайлами и показывает прогресс.
 
 **Разметка (labeling).** Полноценный инструмент рисования масок: кисть, ластик, зум,
-обрезка по чашке, сохранение в структурированную сессию и экспорт в ZIP — чтобы
-загрузить эталонные данные автору.
+обрезка по чашке, сохранение в структурированную сессию и экспорт в ZIP. Длительные
+операции выполняются в фоне; рисование обновляет локальную область изображения.
 
 **Сравнение алгоритмов.** GUI- и CLI-прогон по датасету с расчётом IoU, Dice, F1,
 Precision, Recall, Accuracy; попарное сравнение «победитель по снимку», кэш предсказаний,
@@ -575,12 +576,16 @@ UV_PROJECT_ENVIRONMENT=.venv-dev uv sync --extra dev
 # Быстрые тесты (без slow и GUI)
 UV_PROJECT_ENVIRONMENT=.venv-dev uv run --no-sync pytest -m "not slow and not gui"
 
+# GUI-тесты responsiveness/worker (нужен доступный Qt display/offscreen backend)
+UV_PROJECT_ENVIRONMENT=.venv-dev uv run --no-sync pytest -m gui
+
 # Полный набор
 UV_PROJECT_ENVIRONMENT=.venv-dev uv run --no-sync pytest
 ```
 
 Маркеры: `slow` (нужны реальные изображения), `gui` (нужен QApplication),
-`hypothesis` (property-based тесты).
+`hypothesis` (property-based тесты). CI регулярно запускает тесты `not slow and
+not gui` на Linux и Windows и часть GUI worker-тестов на Windows с offscreen backend; полный GUI heartbeat acceptance-набор локально запускайте командой выше.
 
 ---
 
@@ -594,10 +599,10 @@ bacterial-colony-area/
 │   ├── colony_detector.py      Чашка (отражения → Hough), бинаризация, компоненты
 │   ├── image_processor.py      Зелёный канал, CLAHE, медианный blur
 │   └── geometry.py, params.py, results.py
-├── ui/                         Окна PyQt6: главное, анализ, тестирование, стили
-├── labeling/                   Разметка масок: кисть, ластик, зум, ZIP-экспорт
+├── ui/                         Окна PyQt6, shared background operations, стили
+├── labeling/                   Разметка масок: локальный рендеринг, async I/O, ZIP
 ├── utils/                      Загрузка изображений, расчёт площади, конфиг, логи
-├── testing/                    Фреймворк оценки: реестр, датасет, метрики, отчёты
+├── testing/                    Оценка: CPU/memory-aware pipeline, telemetry, отчёты
 │   ├── registry.py             @register_algorithm / register_algorithm_instance
 │   ├── classic_algorithms.py   4 классических профиля
 │   ├── onnx_algorithm.py       ONNX-адаптер + регистрация моделей из models/

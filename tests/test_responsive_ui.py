@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
-    QTableWidget,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
@@ -229,7 +229,7 @@ def _assert_no_interactive_overlap(root):
         QLineEdit,
         QListWidget,
         QSlider,
-        QTableWidget,
+        QTableView,
     )
     widgets = [
         widget
@@ -583,12 +583,20 @@ def test_labeling_window_toolbar_and_image_fit_compact_sizes(
         60, 60, 50, image.shape[:2]
     )
     window._load_file_list()
+    qtbot.waitUntil(lambda: window.file_list.count() > 0, timeout=5000)
     item = window.file_list.item(0)
     assert item is not None
     window.file_list.setCurrentItem(item)
     window._on_file_selected(item)
-    assert window.current_path == source_path
-    assert window.paint_label._image.shape[:2] == image.shape[:2]
+    # Загрузка изображения асинхронна (задача 6.1): дожидаемся результата.
+    qtbot.waitUntil(lambda: window.current_path == source_path, timeout=5000)
+    qtbot.waitUntil(
+        lambda: (
+            window.paint_label._image is not None
+            and window.paint_label._image.shape[:2] == image.shape[:2]
+        ),
+        timeout=5000,
+    )
 
     qtbot.wait(20)
     initial_size = window.size()
@@ -628,8 +636,9 @@ def test_labeling_window_toolbar_and_image_fit_compact_sizes(
     )
     window.btn_save.click()
     saved_mask = window.masks_dir / "sample_mask.png"
-    assert saved_mask.is_file()
-    assert saved_masks
+    # Сохранение маски асинхронно (задача 6.6): дожидаемся записи.
+    qtbot.waitUntil(lambda: saved_mask.is_file(), timeout=5000)
+    qtbot.waitUntil(lambda: bool(saved_masks), timeout=5000)
 
     archive_path = tmp_path / "session.zip"
     monkeypatch.setattr(
@@ -637,7 +646,8 @@ def test_labeling_window_toolbar_and_image_fit_compact_sizes(
         lambda *_args, **_kwargs: (str(archive_path), ""),
     )
     window.btn_export.click()
-    assert archive_path.is_file()
+    # Экспорт ZIP асинхронный и атомарный (задача 6.6).
+    qtbot.waitUntil(lambda: archive_path.is_file(), timeout=10000)
 
 
 @pytest.mark.gui
