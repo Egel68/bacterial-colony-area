@@ -82,6 +82,9 @@ runtime-зависимостях. Благодаря этому обычный �
 
 ## 2. Карта репозитория
 
+Модули и перечень тестов далее описывают текущую структуру; точное количество
+файлов не фиксируется, чтобы карта не устаревала при добавлении тестов.
+
 ```
 bacterial-colony-area/
 ├── main.py                     Точка входа GUI + --smoke-test-model
@@ -110,18 +113,23 @@ bacterial-colony-area/
 │   ├── statistics.py           Описательная статистика, Wilcoxon, выбросы
 │   ├── dataset.py              TestDataset — загрузчик пар source/cropped
 │   ├── baseline.py             BaselineDataset — 3 структуры + run_baseline
-│   ├── scheduler.py            Батчи + ThreadPoolExecutor + кэш предсказаний
+│   ├── scheduler.py            CPU-aware executor и bounded decode/compute pipeline
+│   ├── pipeline_overlap.py     Ограниченный prefetch, backpressure, starvation
+│   ├── resource_policy.py      Общий бюджет algorithm/decode/native-потоков
+│   ├── pipeline_observer.py    Фазы прогресса/ошибок пайплайна
+│   ├── profiling.py            Контекстное измерение стадий обработки
 │   ├── cache.py                Сигнатура датасета + PredictionCache (PNG)
-│   ├── telemetry.py            TelemetryCollector — json + jsonl
+│   ├── telemetry.py            CPU/RSS/I/O/stage telemetry — json + jsonl
 │   ├── runner.py               run_all, агрегация, Wilcoxon, выбросы, winners
 │   ├── dashboard.py            HTML-отчёт Chart.js
 │   ├── evaluator.py            Режим evaluate: конфиг, run-dir, отчёты
 │   └── __main__.py             CLI: report / baseline / evaluate
 │
 ├── ui/                         Слой 4: GUI
+│   ├── background.py           Общий жизненный цикл worker, отмена и deferred close
 │   ├── main_window.py          Стартовое окно
-│   ├── analysis_window.py      Окно анализа + _AlgorithmWorker + ImageLabel
-│   ├── testing_window.py       Окно тестирования + _RunWorker
+│   ├── analysis_window.py      Асинхронный анализ и presentation + ImageLabel
+│   ├── testing_window.py       Окно тестирования с фоновыми операциями
 │   ├── labeling_session_dialog.py  Диалог «Новая сессия разметки»
 │   ├── styles.py               QSS-тема Catppuccin Mocha
 │   └── controllers/            Qt-независимая бизнес-логика
@@ -157,7 +165,7 @@ bacterial-colony-area/
 │
 ├── models/                     Встроенные ONNX-модели (*.onnx)
 ├── test_images/                Датасет пар изображение/маска
-├── tests/                      30 файлов pytest + conftest.py
+├── tests/                      Pytest suite: pipeline, GUI heartbeat, cancellation, presentation и regressions
 ├── docs/                       Документация
 └── pyproject.toml              Зависимости, extras, console scripts
 ```
@@ -460,11 +468,14 @@ _all_names() -> list[str]                            # приватный хел
 
 Различия в многопоточности (реализовано в `scheduler._AlgorithmRuntime`):
 
-- **Классы** получают по экземпляру на поток (`threading.local`): четыре
-  классических алгоритма работают параллельно.
-- **Экземпляры** (все `NN:*`-модели) защищены общим `threading.Lock` на имя и
-  вызываются строго последовательно. Это осознанное ограничение: одна
-  `InferenceSession` ONNX Runtime не потокобезопасна для одновременного `run()`.
+- **Классы** получают по экземпляру на поток (`threading.local`): классические
+  алгоритмы могут исполняться параллельно при разрешённой ресурсной политике.
+- **Экземпляры** защищены именованным `threading.Lock` и вызываются
+  последовательно для одного зарегистрированного экземпляра. Текущие bundled
+  `NN:*` алгоритмы — экземпляры, поэтому их вызовы сериализуются; увеличение
+  внешнего worker count само по себе не распараллеливает один экземпляр.
+- Общая политика CPU дополнительно ограничивает одновременно активные внешние
+  algorithm workers, decoder и внутренние native threads OpenCV/ONNX Runtime.
 
 ### 6.2 Алгоритмы
 
@@ -560,61 +571,65 @@ found in …")`. Разница в нюансе: для `importer` маски л
 ```python
 execute_pipeline(dataset, algorithm_names=None, *, workers=None,
                  batch_size=8, memory_budget=None, use_cache=False,
-                 telemetry=None, use_cropped=True)
+                 telemetry=None, use_cropped=True, diagnostics=None,
+                 observer=None, cancel_event=None)
     -> dict[algo][sample][variant] -> dict[metric, float]
 ```
 
-Единственная точка исполнения для всех режимов оценки.
+Единая точка исполнения для `report`, `baseline`, `evaluate` и GUI. Загрузчик
+сэмплов декодирует image/mask один раз на variant и переиспользует массивы для
+выбранных алгоритмов. Ошибки чтения/декодирования привязаны к паре и не мешают
+обработке остальных валидных входов.
 
-```
-для каждого батча (iter_batches):
-    task_count = len(batch) · len(names)
-    effective_workers = _effective_workers(...)          # авто-подбор
-    ThreadPoolExecutor(max_workers=effective_workers):
-        для каждого сэмпла × каждого имени → submit(_run_task)
-        сбор результатов через as_completed
-    если _should_reduce_workers(...) → effective_workers //= 2
-```
+`_execute_batches` перекрывает подготовку следующего batch с compute текущего
+через `PrefetchLoader` (`testing/pipeline_overlap.py`). Очередь по умолчанию
+содержит не более одного заранее подготовленного batch; producer ограничен как
+ёмкостью очереди, так и байтовым бюджетом активных + prefetched входов. При
+заполнении ресурсов чтение/декодирование ожидает backpressure; ошибка или
+отмена приводит к закрытию producer и очистке очереди.
 
-`iter_batches(dataset, *, batch_size=8, memory_budget=None, telemetry=None,
-use_cropped=True)`:
+`memory_budget` — целевой бюджет декодированных inputs, а не жёсткая граница
+RSS процесса: резервируется 25% на временные буферы алгоритмов/runtime. Если
+одна пара превышает input budget, она обрабатывается отдельно и не отбрасывается;
+диагностика отмечает превышение. Память алгоритмических временных буферов и ОС
+не входит в точное ограничение.
 
-- Накапливает `LoadedSample` (`image.nbytes + mask.nbytes`).
-- Батч закрывается при `len(batch) >= batch_size` **или** превышении
-  `memory_budget`.
-- Нечитаемая пара не роняет прогон: ошибка пишется в лог и telemetry,
-  сэмпл пропускается.
-- Превышение бюджета **одним** сэмплом не останавливает прогон — только
-  фиксируется событием `memory_budget_exceeded`.
+### CPU resource policy
 
-`_effective_workers(requested, task_count, memory_budget, batch_bytes)`:
+`testing/resource_policy.py::resolve_resource_policy` распределяет видимую CPU
+ёмкость между algorithm workers, decode и нативными потоками OpenCV/ONNX. Видимая
+ёмкость берётся консервативно по минимуму известных process affinity, cgroup
+CPU quota и физического CPU count хоста; если сигналы недоступны, применяется
+консервативный fallback. Интерактивный режим резервирует CPU ёмкость под GUI.
 
-```
-physical = os.cpu_count()
-если доступен psutil:
-    physical = psutil.cpu_count(logical=False)      # физические ядра
-    при memory_budget: physical = min(physical, available // memory_budget)
-limit = requested, иначе physical
-return max(1, min(limit, physical, task_count))
-```
+`--workers N` задаёт верхнюю границу, но окончательный worker count ограничивается
+ёмкостью процесса, готовым числом задач и памятью конкурентных inputs. При
+давлении очереди/ресурсов scheduler может уменьшить число workers. Нативные пулы
+ограничиваются совместно с внешним concurrency, чтобы не умножать без контроля
+threads × workers.
 
-`requested <= 0` → `ValueError("workers must be positive")`.
-
-`_should_reduce_workers(...)` срабатывает при двух условиях:
-
-1. `batch_bytes > memory_budget`, либо
-2. сумма двух последних `queue_wait` больше удвоенной суммы двух последних
-   `detect` — признак перегрузки очереди.
-
-`_run_task` — единая единица работы, она же единственное место, где считаются
-метрики:
-
-```
-queue_wait → cache (get_array) → [detect → put_array] → metrics
+```text
+resolve_resource_policy → apply_native_limits
+  → iter_batches → PrefetchLoader(decode producer, bounded queue)
+  → ThreadPoolExecutor(algorithm tasks)
+  → metrics / observer phases / telemetry
 ```
 
-Ключ кэша предсказаний включает `is_cropped` варианта, поэтому исходник и
-обрезок одного объекта не путаются (`scheduler.py:369`).
+Число workers — настройка параллелизма, а не гарантия ускорения. Бенчмарк
+принимается по end-to-end wall time/throughput, корректности результата и
+соблюдению memory target. Зафиксированный warm-cache acceptance workload дал
+одинаковые хэши результатов, но auto mode был примерно в 3.16 раза медленнее
+последовательного; cold-storage physical I/O не измерялся. Это измерение
+конкретного workload, а не универсальная характеристика.
+
+`_run_task` измеряет время ожидания от момента отправки конкретной задачи,
+переиспользование `SampleContext`/prediction cache, detect и metrics. Ошибки,
+progress и фазы передаются через `PipelineObserver`; отмена останавливает
+постановку новых работ на безопасной границе, уже начатые native-вызовы
+завершаются кооперативно.
+
+Ключ prediction cache включает алгоритм, параметры, variant (`is_cropped`) и
+содержимое входа, поэтому исходник и обрезок одного объекта не путаются.
 
 ### 6.5 Кэш (`testing/cache.py`)
 
@@ -708,13 +723,22 @@ accuracy  = (tp + tn) / (tp + fp + fn + tn + ε)
 TelemetryCollector(enabled=False, output_path=None, interval=5.0,
                    debug_tasks=False)
     .start() / .event(type, **payload) / .maybe_snapshot(**payload)
-    .record_stage(stage, duration)      # очередь, кэш, detect, metrics, load, report
-    .record_task(submitted=, completed=, failed=, active=, queue_depth=)
-    .record_work(objects=, variants=, algorithm_calls=)
-    .record_cache(hit) / .record_serial_call() / .record_error(msg)
-    .record_task_event(**payload)
+    .record_stage(stage, duration)      # file_read, image_decode, input_wait,
+                                        # queue_wait, cache, detect, metrics, report
+    .record_logical_io(stage, bytes, decoded_bytes=...)
+    .record_cpu_availability(logical_count, physical_count, affinity, quota)
+    .record_worker_limits(outer_workers, native_threads, source)
+    .record_input_starvation(starvation_seconds, active_seconds, ratio)
+    .record_task(...) / .record_work(...) / .record_cache(...) / .record_error(...)
     .summary() / .finish(**payload)
 ```
+
+Сводка включает доступность CPU/affinity/quota, внешние и нативные worker limits,
+logical read/decode bytes, process CPU time и cores consumed, RSS/peak RSS,
+доступность системных I/O counters, latency стадий и input-starvation. Ноль
+физических read bytes не означает, что логического чтения не было: данные могли
+поступать из OS page cache. Неизвестные системные счётчики остаются `null`, а не
+подменяются нулём.
 
 Артефакты (только при `enabled=True`):
 
@@ -844,18 +868,25 @@ Catppuccin Mocha, `get_image_frame_style()` — рамка области про
 `_on_algorithm_changed` **отключает** чувствительность, контраст, мин. размер,
 solid fill и силу заливки — они на него не влияют.
 
-`_AlgorithmWorker` (`QObject`, переносится в `QThread`) выполняет
-`controller.calculate_algorithm_result(...)` и сигналит `progress(completed,total)`,
-`finished((result, mask))` или `failed(message)`. Пока поток работает,
-`_run_algorithm_async` блокирует кнопку «Пересчитать», выпадающий список
-алгоритмов и спиннеры геометрии/отступа. `closeEvent` на активном прогоне
-перехватывает закрытие окна.
+Окно создаёт `BackgroundOperation` (`ui/background.py`) для загрузки/декодирования,
+начального поиска чашки, классического анализа и выбранных алгоритмов. Worker
+получает snapshot массивов, сообщает статус/прогресс queued-сигналами и проверяет
+кооперативную отмену между безопасными этапами (например, между NN-тайлами).
+Результаты помечены generation; результат предыдущего изображения не применяется
+после смены выбора. Qt widgets и `QPixmap` остаются в GUI-потоке.
 
-Отображение в `_update_display` собирает композит из оригинала, контура чашки
-и зелёной заливки колоний (или ч/б маски) в зависимости от режима.
+Переключение представления и resize окна планируют актуальную задачу композитинга
+видимой области; устаревшая generation отбрасывается. Полноразмерные маски и
+алгоритмические данные сохраняются, а не заменяются уменьшенным pixmap.
 
-Сохранение («💾 Сохранить») пишет **отображаемый** pixmap области просмотра,
-а не исходное разрешение — при сильном зуме картинка будет меньше оригинала.
+Сохранение запускает тяжёлую сериализацию/запись в фоне по snapshot выбранного
+режима и overlay. По совместимому контракту сохраняется содержимое и размер
+отображаемого pixmap (поэтому сильный zoom может дать файл меньше исходника),
+формат кодирования выбирается расширением файла.
+
+При закрытии окна активная операция получает запрос отмены; GUI не делает
+синхронный `wait()`, продолжает обрабатывать события в состоянии «Завершение…»
+и закрывается после безопасного возврата worker.
 
 ### `ui/controllers/analysis_controller.py` — `AnalysisController`
 
@@ -898,7 +929,12 @@ AnalysisController(detector=None, calculator=None)
 | 🚀 Запуск | «▶️ Запустить тест», «💾 Экспорт отчёта» |
 | 📊 Результаты | Таблица метрик + таблица парного сравнения |
 
-`_RunWorker` выполняет `run_all` в отдельном `QThread`. Поле «Объектов» = 0
+Прогон алгоритмов, report export и подготовка больших таблиц выполняются через
+`BackgroundOperation` вне GUI-потока. Окно показывает фазу (scan/read-decode,
+algorithm, comparison, result preparation), состояние и прогресс; большие
+таблицы добавляются порциями. Отмена прекращает постановку новой работы на
+безопасной границе; закрытие во время неотменяемого native-вызова не блокирует
+GUI и завершается после безопасного возврата worker. Поле «Объектов» = 0
 означает «без ограничения» и передаётся как `sample_limit=None`.
 
 Важно: окно тестирования **не** вызывает `register_bundled_models()`, поэтому
@@ -939,27 +975,30 @@ SessionManager(config_path=None)
 
 ### `labeling/labeling_window.py`
 
-`PaintLabel(QLabel)` — виджет с масштабированием и рисованием:
+`PaintLabel(QLabel)` — виджет полноразмерной маски с масштабированием и локальным рендерингом:
 
 | Метод | Поведение |
 |---|---|
-| `set_image(image, mask=None)` | Загрузка кадра и необязательной маски |
-| `set_petri_info(info)` | Отрисовка окружности чашки поверх кадра |
+| `set_image(image, mask=None)` | Установка кадра и маски |
+| `set_petri_info(info)` | Обновление геометрии чашки |
 | `mask` | Текущая маска (свойство) |
 | `clear_mask()` | Полная очистка |
 | `zoom_in/out/reset`, `zoom_percent` | Диапазон 0.1× – 20× |
 | `wheelEvent` | Зум колесом мыши |
 | `mousePress/Move/Release` | Рисование с поправкой координат на масштаб (`_widget_to_image`) |
-| `_paint_at(pos)` | Рисует круг радиуса `brush_size // 2` в режиме кисти или стирает в режиме ластика |
-| `_render()` | Пересборка композитного изображения |
+| `_paint_at(pos)` | Меняет локальную область исходной маски, патчит кеш уровней масштаба и инвалидирует dirty rect |
+| `_composite_region()` | Создаёт композит только запрошенной областью full-resolution кадра |
+| `_build_level()` / `_get_level()` | Кэширует уменьшенные уровни для текущего режима просмотра |
+| `paintEvent()` | Отображает только видимые области/участки, а не пересобирает полный overlay при каждом движении кисти |
 
-`LabelingWindow(QMainWindow)` — левая панель (переключатель режимов
-«📁 Исходные изображения» / «✂️ Обрезки чашек», текущий путь, список файлов,
-«🔄 Обновить», «📂 Добавить изображения», спиннеры геометрии чашки,
-«🔍 Авто-поиск», «✂️ Обрезать по чашке»), центральная область просмотра и
-панель инструментов: размер кисти (− / значение / +), зум (+ / − / 1:1),
-переключатель вида, «✏️ Рисовать» / «🧹 Ластик», «🗑 Очистить»,
-«💾 Сохранить маску», «📦 Экспорт в ZIP».
+`LabelingWindow(QMainWindow)` — левая панель (режимы source/cropped, текущий
+путь, список файлов, «🔄 Обновить», «📂 Добавить изображения», геометрия чашки,
+авто-поиск и обрезка), центральная область просмотра и кистевые инструменты.
+Чтение списка, decode исходника/маски, поиск чашки, обрезка, массовое копирование,
+save mask и ZIP export выполняются в `BackgroundOperation`; списки и результаты
+применяются только для актуальных generation. Qt widgets изменяются только в GUI
+потоке. Устаревшая работа отменяется кооперативно; закрытие ждёт возврата активных
+worker через deferred close, не блокируя обработку событий.
 
 Правила именования масок при сохранении:
 
@@ -1298,17 +1337,22 @@ Nuitka; собирается он в `.github/workflows/build.yaml`.
 | `push` | `main`, `master` | — |
 | `workflow_dispatch` | любая, вручную | — |
 
-Задание `detect-changes` дополнительно сравнивает diff и **пропускает** сборку,
-если затронуты только файлы `openspec/`, — чтобы правки спецификаций не
-пересобирали 170-МБ бинарник. Матрица: `ubuntu-latest` + `windows-latest`,
-Python 3.13 через `uv`, артефакты загружаются в GitHub Actions.
+Feature-ветки проверяются через PR в `develop` (или ручной dispatch), отдельного
+push-триггера для feature/develop веток нет. `detect-changes` пропускает build,
+если затронуты только файлы `openspec/`. Иначе запускаются lint/format и тесты
+в матрице `ubuntu-latest` + `windows-latest`, Python 3.13 через `uv`, далее
+Nuitka-сборка и CPU inference smoke checks. Windows также запускает GUI-worker
+тесты offscreen; Linux публикует JUnit pytest artifact. Сборочные артефакты
+публикуются в GitHub Actions.
 
 ---
 
 ## 11. Тесты
 
-30 файлов в `tests/` плюс `conftest.py` с фикстурами (`blank_image_bgr`,
-`binary_mask_circle`, `synthetic_colony_image`, `petri_info`, …).
+Файлы тестов и `conftest.py` покрывают домен, pipeline/resources, Qt GUI,
+фоновые операции и сборку. Точный состав меняется; актуальный перечень находится
+непосредственно в `tests/`. Фикстуры включают `blank_image_bgr`,
+`binary_mask_circle`, `synthetic_colony_image`, `petri_info` и др.
 Запуск: см. [user-guide.md](user-guide.md#запуск-тестов).
 
 | Область | Файлы |
@@ -1317,9 +1361,9 @@ Python 3.13 через `uv`, артефакты загружаются в GitHub
 | Расчёты | `test_calculations.py`, `test_metrics.py` |
 | Загрузка изображений | `test_image_loader.py` |
 | Реестр и алгоритмы | `test_registry.py`, `test_classic_algorithms.py`, `test_onnx_algorithm.py`, `test_tiled_onnx_algorithm.py` |
-| Прогон и планировщик | `test_runner.py`, `test_pipeline_support.py`, `test_evaluation_cache.py` |
-| GUI | `test_analysis_controller.py`, `test_analysis_model_selection.py`, `test_testing_window.py`, `test_labeling_controller.py` |
-| Разметка | `test_session_manager.py` |
+| Прогон и планировщик | `test_runner.py`, `test_pipeline_support.py`, `test_pipeline_overlap.py`, `test_resource_policy.py`, `test_telemetry.py`, `test_evaluation_cache.py` |
+| GUI и responsiveness | `test_analysis_controller.py`, `test_analysis_model_selection.py`, `test_analysis_window_responsiveness.py`, `test_testing_window.py`, `test_testing_window_responsiveness.py`, `test_labeling_controller.py`, `test_labeling_window_responsiveness.py`, `test_background_operation.py` |
+| Разметка | `test_session_manager.py`, labeling GUI tests |
 | Данные и сплит | `test_coco_importer.py`, `test_dataset_split.py`, `test_patch_dataset.py`, `test_training_dataset.py` |
 | Обучение | `test_training_loop.py`, `test_training_evaluation.py`, `test_training_pipeline.py`, `test_training_cli.py`, `test_training_cli_runtime.py`, `test_mobilenet_segmenter.py` |
 | Сборка и зависимости | `test_nuitka_build.py`, `test_runtime_dependencies.py` |
@@ -1343,16 +1387,21 @@ PyTorch/ONNX, отказ перезаписи при обучении.
      → AnalysisWindow._update_display (композит + текст результата)
 ```
 
-### NN-алгоритм в окне анализа
+### Фоновая операция в окне анализа
 
 ```
-original_image.copy() + petri_mask.copy() + spin_margin.value()
-   → QThread → _AlgorithmWorker.run
-       → AnalysisController.calculate_algorithm_result
-           (алгоритм NN:* → detect_with_progress(progress_callback))
-       → сигнал finished((result, mask))
-   → главный поток: controller.set_algorithm_mask → текст + композит
+load/decode или (image, mask, params, generation) snapshot
+   → BackgroundOperation / QThread
+       → dish search / classic analysis / algorithm inference
+       → status/progress/error/result queued signals
+   → GUI thread: применить только актуальное generation
+       → viewport presentation или результат/ошибка
 ```
+
+Отмена прекращает будущие этапы и проверяется на безопасных границах; native
+вызов, который нельзя прервать, возвращается естественно. Закрытие окна
+откладывается без блокирующего GUI wait. Saving и presentation также используют
+фоновые задачи со snapshot и проверкой актуальности.
 
 Маска публикуется в состоянии контроллера **только** после завершения —
 частичный результат в GUI не попадает.
@@ -1361,12 +1410,14 @@ original_image.copy() + petri_mask.copy() + spin_margin.value()
 
 ```
 TestDataset / BaselineDataset
-   → scheduler._sample_refs → iter_batches (лимит по числу и байтам)
-   → ThreadPoolExecutor: (сэмпл × алгоритм)
-       → PredictionCache.get_array → [runtime.detect] → put_array
+   → scheduler._sample_refs → iter_batches (лимит batch и decoded-input memory)
+   → PrefetchLoader (bounded decode producer + backpressure; overlap decode/compute)
+   → ThreadPoolExecutor: (sample × algorithm), с общей CPU/native-thread policy
+       → SampleContext / PredictionCache.get_array → [runtime.detect] → put_array
        → compute_segmentation_metrics
+   → PipelineObserver (progress/phases/errors) + structured Telemetry
    → агрегация (compute_summary / wilcoxon / outliers / winners)
-   → dashboard.generate_report  |  export_json + evaluator HTML
+   → dashboard.generate_report | export_json + evaluator HTML
 ```
 
 ### COCO → модель в приложении
@@ -1451,19 +1502,21 @@ datasets/22022540/annot_COCO.json
 11. **Сохранение результата в окне анализа пишет pixmap области просмотра.**
     При зуме разрешение сохранённого PNG ниже исходного.
 
-12. **Закрытый прогон блокирует закрытие окна.**
-    `AnalysisWindow.closeEvent` перехватывает закрытие, пока NN-инференс в
-    фоновом потоке ещё идёт.
+12. **Отмена native-вызова кооперативная.**
+    Уже начатый вызов OpenCV/ONNX может завершиться до реакции на отмену;
+    окна показывают «Завершение…», продолжают обрабатывать события и
+    закрываются после безопасного возврата worker, не ожидая его синхронно.
 
 13. **`TestDataset` не читает `dataset.json`.**
     GUI тестирования и режим `report` работают только с папками
     `source/` + `masks/`.
 
-14. **Многопоточность NN-алгоритмов ограничена.**
-    Зарегистрированные **экземпляры** вызываются под общим `threading.Lock`
-    строго последовательно; параллельно работают только зарегистрированные
-    **классы** (то есть классика). Увеличение `--workers` для `NN:*`
-    ускорения не даст.
+14. **Многопоточность экземпляров алгоритмов сериализована.**
+    Зарегистрированные экземпляры вызываются под именованным `threading.Lock`;
+    текущие `NN:*` представлены экземплярами, тогда как классовые алгоритмы
+    получают экземпляры по потокам. Общая CPU/native resource policy ограничивает
+    суммарную concurrency, но worker count не гарантирует ускорение: сверяйтесь
+    с end-to-end benchmark для конкретного набора и машины.
 
 15. **Нет сохранения состояния окон.**
     `QSettings` не используется: параметры анализа, выбранный датасет и
