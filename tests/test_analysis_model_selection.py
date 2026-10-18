@@ -6,7 +6,7 @@ import time
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QPoint, Qt, QTimer
 
 from analysis.geometry import PetriInfo
 from testing.interface import BaseDetectionAlgorithm
@@ -127,7 +127,7 @@ def test_analysis_always_uses_approved_bundled_model_without_tuning_controls(
     assert not hasattr(window, "spin_fill_strength")
     assert not hasattr(window, "spin_x")
     assert not hasattr(window, "spin_y")
-    assert not hasattr(window, "spin_radius")
+    assert window.spin_radius.isEnabled()
     assert algorithm.thread_ids
     assert window.analysis_results is not None
     assert window.analysis_results.colony_count == 1
@@ -212,7 +212,7 @@ def test_analysis_errors_do_not_fallback_to_classic(qtbot, tmp_path, monkeypatch
     _INSTANCES.pop("NN:colony_seg", None)
 
 
-def test_dish_autodetection_failure_does_not_create_fallback_or_manual_geometry(
+def test_dish_autodetection_failure_does_not_create_fallback_geometry(
     qtbot, tmp_path, monkeypatch
 ):
     image_path = _write_image(tmp_path)
@@ -241,8 +241,115 @@ def test_dish_autodetection_failure_does_not_create_fallback_or_manual_geometry(
     assert not algorithm.thread_ids
     assert not hasattr(window, "spin_x")
     assert not hasattr(window, "spin_y")
-    assert not hasattr(window, "spin_radius")
+    assert window.spin_radius.isEnabled() is False
+    assert window.image_label._roi_info is None
     window.close()
+
+
+def test_detected_roi_can_be_corrected_and_requires_explicit_recalculation(
+    qtbot, tmp_path, monkeypatch
+):
+    image_path = _write_image(tmp_path)
+    _install_model(monkeypatch)
+    _patch_dialogs(monkeypatch)
+    window = _make_window(qtbot, image_path, monkeypatch)
+    qtbot.waitUntil(
+        lambda: window.petri_info is not None and not window._analysis_busy,
+        timeout=5000,
+    )
+    qtbot.waitUntil(lambda: not window._analysis_worker_running, timeout=5000)
+
+    initial_info = window.petri_info
+    assert initial_info is not None
+    assert window.spin_radius.isEnabled()
+    assert window.image_label._roi_info == initial_info
+    assert window.analysis_results is not None
+
+    window.spin_radius.setValue(initial_info.radius - 6)
+    updated_info = window.petri_info
+    assert updated_info.radius == initial_info.radius - 6
+    assert window.analysis_results is None
+    assert "Пересчитать" in window.text_results.toPlainText()
+    assert window.controller.colony_mask is not None
+    assert np.count_nonzero(window.controller.colony_mask) == 0
+
+    window.btn_apply.click()
+    qtbot.waitUntil(
+        lambda: window.analysis_results is not None and not window._analysis_busy,
+        timeout=5000,
+    )
+    assert window.analysis_results is not None
+    effective_radius = updated_info.radius * (100 - 8) / 100
+    expected_area = int(np.pi * effective_radius**2)
+    assert window.analysis_results.petri_area_px == expected_area
+    window.close()
+    from testing.registry import _INSTANCES
+
+    _INSTANCES.pop("NN:colony_seg", None)
+
+
+def test_roi_change_cancels_stale_inference_and_explicit_recalculate_works(
+    qtbot, tmp_path, monkeypatch
+):
+    image_path = _write_image(tmp_path)
+    algorithm = _install_model(
+        monkeypatch, _SlowTiledAlgorithm(delay=0.1, tile_count=5)
+    )
+    _patch_dialogs(monkeypatch)
+    window = _make_window(qtbot, image_path, monkeypatch)
+    qtbot.waitUntil(lambda: window._analysis_busy, timeout=5000)
+
+    window.spin_radius.setValue(window.spin_radius.value() - 5)
+    assert window.analysis_results is None
+    assert not window.btn_apply.isEnabled()
+    qtbot.waitUntil(lambda: not window._analysis_worker_running, timeout=5000)
+    assert window.analysis_results is None
+    assert window.btn_apply.isEnabled()
+
+    window.btn_apply.click()
+    qtbot.waitUntil(
+        lambda: window.analysis_results is not None and not window._analysis_busy,
+        timeout=5000,
+    )
+    assert len(algorithm.thread_ids) == 2
+    window.close()
+    from testing.registry import _INSTANCES
+
+    _INSTANCES.pop("NN:colony_seg", None)
+
+
+def test_dragging_roi_moves_center_and_clips_it_inside_frame(
+    qtbot, tmp_path, monkeypatch
+):
+    image_path = _write_image(tmp_path)
+    _install_model(monkeypatch)
+    _patch_dialogs(monkeypatch)
+    window = _make_window(qtbot, image_path, monkeypatch)
+    qtbot.waitUntil(
+        lambda: window.petri_info is not None and not window._analysis_busy,
+        timeout=5000,
+    )
+    original = window.petri_info
+    image_rect = window.image_label._displayed_image_rect()
+    start = QPoint(
+        round(image_rect.x() + original.cx * image_rect.width() / 120),
+        round(image_rect.y() + original.cy * image_rect.height() / 120),
+    )
+    end = QPoint(image_rect.right() - 1, image_rect.bottom() - 1)
+
+    qtbot.mousePress(window.image_label, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(window.image_label, end)
+    qtbot.mouseRelease(window.image_label, Qt.MouseButton.LeftButton, pos=end)
+
+    moved = window.petri_info
+    assert moved.center != original.center
+    assert moved.cx <= moved.image_shape[1] - moved.radius - 1
+    assert moved.cy <= moved.image_shape[0] - moved.radius - 1
+    assert window.analysis_results is None
+    window.close()
+    from testing.registry import _INSTANCES
+
+    _INSTANCES.pop("NN:colony_seg", None)
 
 
 def test_initial_load_and_detection_keep_gui_responsive(qtbot, tmp_path, monkeypatch):
@@ -335,6 +442,7 @@ def test_bundled_analysis_runs_in_background(qtbot, tmp_path, monkeypatch):
     assert not window.btn_apply.isEnabled()
     assert "NN:colony_seg" in window.status_label.text()
     qtbot.waitUntil(lambda: not window._analysis_busy, timeout=5000)
+    qtbot.waitUntil(lambda: not window._analysis_worker_running, timeout=5000)
 
     assert algorithm.thread_ids and algorithm.thread_ids[0] != gui_thread
     assert window.analysis_results is not None

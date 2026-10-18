@@ -114,6 +114,32 @@ class TestAnalysisController:
         assert mask[100, 100] == 255
         assert np.count_nonzero(mask[petri_mask == 0]) == 0
 
+    def test_custom_roi_center_and_radius_limit_mask_and_metrics(self, blank_image_bgr):
+        class _EveryPixel:
+            name = "all-pixels"
+            description = "test"
+
+            def detect(self, image, is_cropped=False):
+                return np.full(image.shape[:2], 255, dtype=np.uint8)
+
+        h, w = blank_image_bgr.shape[:2]
+        petri_info = PetriInfo(cx=45, cy=55, radius=30, image_shape=(h, w))
+        petri_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(petri_mask, petri_info.center, petri_info.radius, 255, -1)
+        result, colony_mask = AnalysisController().calculate_algorithm_result(
+            blank_image_bgr,
+            petri_mask,
+            _EveryPixel(),
+            petri_info=petri_info,
+            margin_percent=0,
+        )
+
+        assert colony_mask[55, 45] == 255
+        assert colony_mask[55, 100] == 0
+        assert np.count_nonzero(colony_mask[petri_mask == 0]) == 0
+        assert result.petri_area_px == int(np.pi * (petri_info.radius * 0.99) ** 2)
+        assert result.colony_area_px == np.count_nonzero(colony_mask)
+
     def test_calculating_algorithm_result_does_not_publish_partial_mask(
         self, blank_image_bgr
     ):

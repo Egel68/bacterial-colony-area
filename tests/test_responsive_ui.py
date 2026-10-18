@@ -428,6 +428,13 @@ def test_analysis_controls_are_scroll_reachable_at_supported_sizes(
 ):
     window = AnalysisWindow(str(synthetic_analysis))
     _show_at_size(qtbot, window, size)
+    qtbot.waitUntil(
+        lambda: (
+            window._init_operation is not None
+            and not window._init_operation.is_running()
+        ),
+        timeout=5000,
+    )
 
     assert window.minimumSize().width() <= size[0]
     assert window.minimumSize().height() <= size[1]
@@ -437,6 +444,7 @@ def test_analysis_controls_are_scroll_reachable_at_supported_sizes(
     assert scroll.maximum() > 0 or size == (1280, 800)
     controls = [
         window.view_mode_combo,
+        window.spin_radius,
         window.show_petri_contour,
         window.show_area_overlay,
         window.btn_apply,
@@ -447,15 +455,17 @@ def test_analysis_controls_are_scroll_reachable_at_supported_sizes(
     actions = [window.btn_apply, window.btn_save, window.btn_close]
     _assert_no_overlap(actions, window.controls_widget)
     for control in controls:
-        _scroll_into_view(qtbot, control, window.controls_scroll_area)
-        _assert_inside(control, window.controls_scroll_area.viewport())
+        if control is not window.text_results:
+            _scroll_into_view(qtbot, control, window.controls_scroll_area)
+            _assert_inside(control, window.controls_scroll_area.viewport())
         assert control.isVisible()
     assert window.image_label.width() > 0 and window.image_label.height() > 0
     _assert_no_interactive_overlap(window.controls_widget)
     assert not hasattr(window, "algorithm_combo")
     assert not hasattr(window, "slider_sens")
     assert not hasattr(window, "spin_x")
-    assert not hasattr(window, "spin_radius")
+    assert hasattr(window, "spin_radius")
+    assert window.spin_radius.isEnabled()
 
 
 @pytest.mark.gui

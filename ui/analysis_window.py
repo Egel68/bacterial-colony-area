@@ -5,8 +5,8 @@
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QRect, Qt, QTimer
+from PyQt6.QtGui import QImage, QPainter, QPen, QPixmap
 
 from ui.background import BackgroundOperation
 from utils.image_loader import load_image_worker_safe
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -235,14 +236,153 @@ class ImageLabel(QLabel):
         self.setMinimumSize(0, 0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._original_pixmap = None
+        self._roi_info: PetriInfo | None = None
+        self._drag_roi = False
+        self._roi_changed_callback = None
+        self._drag_offset = None
+        self.setMouseTracking(True)
 
     def set_image(self, pixmap: QPixmap):
         self._original_pixmap = pixmap
         self._update_scaled_pixmap()
 
+    def set_roi(self, petri_info: PetriInfo | None):
+        self._roi_info = petri_info
+        self.update()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_scaled_pixmap()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._roi_info is None or self._original_pixmap is None:
+            return
+        target = self._displayed_image_rect()
+        if target.isEmpty():
+            return
+        scale = target.width() / self._roi_info.image_shape[1]
+        center_x = target.x() + self._roi_info.cx * scale
+        center_y = target.y() + self._roi_info.cy * scale
+        radius = self._roi_info.radius * scale
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(Qt.GlobalColor.cyan, 2))
+        painter.drawEllipse(
+            round(center_x - radius),
+            round(center_y - radius),
+            round(radius * 2),
+            round(radius * 2),
+        )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Qt.GlobalColor.white, 1))
+        painter.drawLine(
+            round(center_x - 6), round(center_y), round(center_x + 6), round(center_y)
+        )
+        painter.drawLine(
+            round(center_x), round(center_y - 6), round(center_x), round(center_y + 6)
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._roi_contains(
+            event.position().toPoint()
+        ):
+            self._drag_roi = True
+            point = event.position().toPoint()
+            self._drag_offset = (
+                self._roi_info.cx - self._widget_to_image_x(point.x()),
+                self._roi_info.cy - self._widget_to_image_y(point.y()),
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_roi and self._roi_info is not None:
+            self._move_roi_to(event.position().toPoint())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_roi:
+            self._drag_roi = False
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _displayed_image_rect(self):
+        if self._roi_info is None:
+            pixmap = self.pixmap()
+            if pixmap is None or pixmap.isNull():
+                return self.rect()
+            return pixmap.rect().translated(
+                self.contentsRect().center() - pixmap.rect().center()
+            )
+        scale = min(
+            self.contentsRect().width() / self._roi_info.image_shape[1],
+            self.contentsRect().height() / self._roi_info.image_shape[0],
+        )
+        width = max(1, round(self._roi_info.image_shape[1] * scale))
+        height = max(1, round(self._roi_info.image_shape[0] * scale))
+        return QRect(
+            self.contentsRect().center().x() - width // 2,
+            self.contentsRect().center().y() - height // 2,
+            width,
+            height,
+        )
+
+    def _roi_contains(self, point):
+        if self._roi_info is None:
+            return False
+        image_rect = self._displayed_image_rect()
+        if not image_rect.contains(point):
+            return False
+        center_x = (
+            image_rect.x()
+            + self._roi_info.cx * image_rect.width() / self._roi_info.image_shape[1]
+        )
+        center_y = (
+            image_rect.y()
+            + self._roi_info.cy * image_rect.height() / self._roi_info.image_shape[0]
+        )
+        radius = (
+            self._roi_info.radius * image_rect.width() / self._roi_info.image_shape[1]
+        )
+        return (point.x() - center_x) ** 2 + (point.y() - center_y) ** 2 <= radius**2
+
+    def _move_roi_to(self, point):
+        image_rect = self._displayed_image_rect()
+        if image_rect.isEmpty():
+            return
+        info = self._roi_info
+        cx = self._widget_to_image_x(point.x())
+        cy = self._widget_to_image_y(point.y())
+        if self._drag_offset is not None:
+            cx += self._drag_offset[0]
+            cy += self._drag_offset[1]
+        radius = info.radius
+        cx = min(max(cx, radius), info.image_shape[1] - radius - 1)
+        cy = min(max(cy, radius), info.image_shape[0] - radius - 1)
+        updated = PetriInfo(cx, cy, radius, info.image_shape)
+        if updated != info:
+            self._roi_info = updated
+            self.update()
+            if self._roi_changed_callback is not None:
+                self._roi_changed_callback(updated)
+
+    def _widget_to_image_x(self, x):
+        image_rect = self._displayed_image_rect()
+        return round(
+            (x - image_rect.x()) * self._roi_info.image_shape[1] / image_rect.width()
+        )
+
+    def _widget_to_image_y(self, y):
+        image_rect = self._displayed_image_rect()
+        return round(
+            (y - image_rect.y()) * self._roi_info.image_shape[0] / image_rect.height()
+        )
 
     def _update_scaled_pixmap(self):
         if self._original_pixmap:
@@ -252,6 +392,7 @@ class ImageLabel(QLabel):
                 Qt.TransformationMode.SmoothTransformation,
             )
             self.setPixmap(scaled)
+            self.update()
 
 
 class AnalysisWindow(QMainWindow):
@@ -267,6 +408,8 @@ class AnalysisWindow(QMainWindow):
         self.petri_mask = None
         self.petri_info: PetriInfo | None = None
         self.analysis_results = None
+        self._analysis_generation = 0
+        self._analysis_worker_running = False
         self._analysis_operation: BackgroundOperation | None = None
         self._init_operation: BackgroundOperation | None = None
         self._save_operation: BackgroundOperation | None = None
@@ -437,6 +580,10 @@ class AnalysisWindow(QMainWindow):
         vl.addWidget(self.image_header)
 
         self.image_label = ImageLabel()
+        self.image_label._roi_changed_callback = self._on_roi_changed
+        self.image_label.setToolTip(
+            "Перетащите круг мышью, чтобы изменить центр области"
+        )
         vl.addWidget(self.image_label, stretch=1)
 
         self.status_label = QLabel("Готов к работе")
@@ -476,6 +623,15 @@ class AnalysisWindow(QMainWindow):
         self.show_area_overlay.stateChanged.connect(self._update_display)
         vl.addWidget(self.show_area_overlay)
 
+        radius_row = QHBoxLayout()
+        radius_row.addWidget(QLabel("Радиус, px:"))
+        self.spin_radius = QSpinBox()
+        self.spin_radius.setRange(1, 1)
+        self.spin_radius.setEnabled(False)
+        self.spin_radius.valueChanged.connect(self._on_roi_radius_changed)
+        radius_row.addWidget(self.spin_radius)
+        radius_row.addStretch()
+        vl.addLayout(radius_row)
         layout.addWidget(group)
 
     def _create_analysis_controls(self, layout: QVBoxLayout):
@@ -514,6 +670,8 @@ class AnalysisWindow(QMainWindow):
     def _apply_petri_result(self, petri_mask, petri_info):
         self.petri_mask = petri_mask
         self.petri_info = petri_info
+        self.image_label.set_roi(None)
+        self.spin_radius.setEnabled(False)
         if self.petri_info is None or self.petri_mask is None:
             self.status_label.setText("Чашка Петри не найдена")
             self.statusBar().showMessage("Анализ невозможен: чашка Петри не найдена")
@@ -524,7 +682,58 @@ class AnalysisWindow(QMainWindow):
                 "Проверьте качество и расположение снимка, затем откройте его снова.",
             )
             return
+        self._set_roi_info(self.petri_info)
         self._run_colony_analysis_only()
+
+    def _set_roi_info(self, info: PetriInfo):
+        h, w = info.image_shape
+        max_radius = max(1, min((w - 1) // 2, (h - 1) // 2))
+        bounded_radius = min(max(info.radius, 1), max_radius)
+        cx = min(max(info.cx, bounded_radius), w - bounded_radius - 1)
+        cy = min(max(info.cy, bounded_radius), h - bounded_radius - 1)
+        self.petri_info = PetriInfo(cx, cy, bounded_radius, info.image_shape)
+        self.petri_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(self.petri_mask, self.petri_info.center, bounded_radius, 255, -1)
+        self.image_label.set_roi(self.petri_info)
+        self.spin_radius.blockSignals(True)
+        self.spin_radius.setRange(1, max_radius)
+        self.spin_radius.setValue(bounded_radius)
+        self.spin_radius.setEnabled(True)
+        self.spin_radius.blockSignals(False)
+        if self.original_image is not None:
+            self._update_display()
+
+    def _on_roi_changed(self, info: PetriInfo):
+        self._set_roi_info(info)
+        self._invalidate_analysis_for_roi_change()
+
+    def _on_roi_radius_changed(self, radius: int):
+        if self.petri_info is None:
+            return
+        info = PetriInfo(
+            self.petri_info.cx,
+            self.petri_info.cy,
+            radius,
+            self.petri_info.image_shape,
+        )
+        self._set_roi_info(info)
+        self._invalidate_analysis_for_roi_change()
+
+    def _invalidate_analysis_for_roi_change(self):
+        self._analysis_generation += 1
+        self.analysis_results = None
+        if self._analysis_worker_running and self._analysis_operation is not None:
+            self._analysis_operation.cancel()
+        self._analysis_busy = False
+        self.btn_apply.setEnabled(not self._analysis_worker_running)
+        self.progress_bar.hide()
+        self.controller.set_algorithm_mask(
+            np.zeros(self.petri_mask.shape, dtype=np.uint8)
+        )
+        self.text_results.setText("Область изменена. Нажмите «Пересчитать».")
+        self.status_label.setText("Область анализа изменена")
+        self.statusBar().showMessage("Проверьте область и нажмите «Пересчитать»")
+        self._update_display()
 
     def _run_colony_analysis_only(self):
         """Запуск анализа: классический или выбранный алгоритм — в worker (5.2)."""
@@ -533,11 +742,12 @@ class AnalysisWindow(QMainWindow):
         if not self.petri_info or self.original_image is None:
             return
 
-        if self._analysis_busy:
+        if self._analysis_worker_running or self._analysis_busy:
             return
 
         self._analysis_kind = "algorithm"
         self._analysis_busy = True
+        self._analysis_worker_running = True
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self.btn_apply.setEnabled(False)
@@ -551,17 +761,20 @@ class AnalysisWindow(QMainWindow):
         operation.result_ready.connect(self._on_analysis_finished)
         operation.error_raised.connect(self._on_analysis_failed)
         operation.cancellation_confirmed.connect(self._on_analysis_cancelled)
+        operation.finished.connect(self._on_analysis_worker_finished)
         self._analysis_operation = operation
         # Снимок фиксирует входы операции; модель и порог выбраны приложением.
         operation.start(
             image=self.original_image,
-            petri_mask=self.petri_mask,
+            petri_mask=self.petri_mask.copy(),
             petri_info=self.petri_info,
+            analysis_generation=self._analysis_generation,
         )
 
-    def _analysis_work(self, ctx, image, petri_mask, petri_info):
+    def _analysis_work(self, ctx, image, petri_mask, petri_info, analysis_generation):
         """Worker: инференс единственной утверждённой bundled-модели."""
         from testing.onnx_algorithm import register_bundled_models
+
         bundled_models = register_bundled_models()
         algorithm = next(
             (model for model in bundled_models if model.name == APPROVED_MODEL_NAME),
@@ -585,7 +798,17 @@ class AnalysisWindow(QMainWindow):
             margin_percent=MODEL_MARGIN_PERCENT,
             progress_callback=_progress,
         )
-        return {"kind": "algorithm", "results": result, "mask": mask}
+        return {
+            "kind": "algorithm",
+            "results": result,
+            "mask": mask,
+            "analysis_generation": analysis_generation,
+        }
+
+    def _on_analysis_worker_finished(self, generation: int):
+        self._analysis_worker_running = False
+        if not self._analysis_busy and not self._closing:
+            self.btn_apply.setEnabled(True)
 
     def _on_analysis_progress(self, completed, total):
         self.progress_bar.setRange(0, max(1, total))
@@ -598,6 +821,9 @@ class AnalysisWindow(QMainWindow):
         self._cleanup_analysis_ui()
         if generation != self._view_generation:
             return  # устаревший результат
+        if payload["analysis_generation"] != self._analysis_generation:
+            self.text_results.setText("Область изменена. Нажмите «Пересчитать».")
+            return  # геометрия ROI изменилась во время инференса
         self.controller.set_algorithm_mask(payload["mask"])
         result = payload["results"]
         self.analysis_results = result
@@ -628,7 +854,7 @@ class AnalysisWindow(QMainWindow):
 
     def _cleanup_analysis_ui(self):
         self._analysis_busy = False
-        self.btn_apply.setEnabled(True)
+        self.btn_apply.setEnabled(not self._analysis_worker_running)
         self.progress_bar.hide()
 
     def closeEvent(self, event):
@@ -734,6 +960,7 @@ class AnalysisWindow(QMainWindow):
         h, w = rgb.shape[:2]
         q_image = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         self.image_label.set_image(QPixmap.fromImage(q_image))
+        self.image_label.set_roi(self.petri_info)
 
     def _save_result(self):
         if self.original_image is None:
