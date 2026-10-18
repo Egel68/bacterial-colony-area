@@ -57,23 +57,16 @@ def test_nuitka_build_includes_cpu_onnxruntime_and_models(tmp_path):
     models = tmp_path / "models"
     models.mkdir()
     (models / "new_model.onnx").write_bytes(b"model")
-    ort_capi = tmp_path / ".venv-build/lib/python3.13/site-packages/onnxruntime/capi"
-    ort_capi.mkdir(parents=True)
-    (
-        ort_capi / "onnxruntime_pybind11_state.cpython-313-x86_64-linux-gnu.so"
-    ).write_bytes(b"extension")
-    (ort_capi / "libonnxruntime.so.1").write_bytes(b"runtime")
-    (ort_capi / "libonnxruntime_providers_shared.so").write_bytes(b"provider")
-
     with mock.patch.dict("os.environ", {"UV_PROJECT_ENVIRONMENT": ".venv-build"}):
         flags = nuitka_flags.build_flags(tmp_path)
 
     assert "--include-package=onnxruntime" in flags
     assert "--include-package-data=onnxruntime" in flags
     assert "--nofollow-import-to=datasets" in flags
-    assert any("libonnxruntime.so.1" in flag for flag in flags)
-    assert not any("libonnxruntime_providers_shared.so" in flag for flag in flags)
-    assert not any("onnxruntime_pybind11_state" in flag for flag in flags)
+    assert "--noinclude-data-files=onnxruntime/capi/libonnxruntime.so.*" in flags
+    assert not any(
+        "--include-data-files=" in flag and "onnxruntime/capi" in flag for flag in flags
+    )
     assert any(
         flag == f"--include-data-files={models.resolve()}/*.onnx=models/"
         for flag in flags

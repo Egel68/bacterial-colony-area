@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,40 +34,15 @@ def build_flags(root: Path) -> list[str]:
     # но не является Python-кодом приложения; не проверять её метаданные пакета.
     flags.append("--nofollow-import-to=datasets")
 
-    # ONNX Runtime содержит пакет python-модулей, CPython extension и runtime
-    # shared libraries; все они нужны bundled-моделям в inference build.
+    # Nuitka's ONNX Runtime package config collects the native runtime as DLLs.
+    # Exclude the same .so from generic package data to avoid duplicate targets.
     flags.extend(
         [
             "--include-package=onnxruntime",
             "--include-package-data=onnxruntime",
+            "--noinclude-data-files=onnxruntime/capi/libonnxruntime.so.*",
         ]
     )
-    build_env = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv-build"))
-    if not build_env.is_absolute():
-        build_env = root / build_env
-    site_packages = list(build_env.glob("lib/python*/site-packages"))
-    windows_site_packages = build_env / "Lib" / "site-packages"
-    if windows_site_packages.is_dir():
-        site_packages.append(windows_site_packages)
-    ort_capi_dirs = [
-        path / "onnxruntime" / "capi"
-        for path in site_packages
-        if (path / "onnxruntime" / "capi").is_dir()
-    ]
-    # Nuitka's onnxruntime package config collects the Python extensions and
-    # Windows DLLs. Include only POSIX runtime libraries explicitly: adding the
-    # Windows onnxruntime.dll again as a data file conflicts with Nuitka's DLL
-    # collector at the same distribution destination.
-    for ort_capi in ort_capi_dirs:
-        for pattern in (
-            "libonnxruntime.so",
-            "libonnxruntime.so.*",
-            "libonnxruntime.dylib",
-        ):
-            for library in sorted(ort_capi.glob(pattern)):
-                flags.append(
-                    f"--include-data-files={library}=onnxruntime/capi/{library.name}"
-                )
 
     # Встроенные ONNX-модели: кладём весь каталог models/*.onnx в бинарник.
     models_dir = root / "models"

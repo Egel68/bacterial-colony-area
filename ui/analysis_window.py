@@ -1,23 +1,20 @@
 """
 Окно анализа изображения.
-Отображает изображение и результаты анализа с расширенными настройками.
+Отображает изображение и результаты анализа фиксированной нейросетевой моделью.
 """
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QRect, Qt, QTimer
+from PyQt6.QtGui import QImage, QPainter, QPen, QPixmap
 
-from analysis.params import AnalysisParams
 from ui.background import BackgroundOperation
 from utils.image_loader import load_image_worker_safe
 from PyQt6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -28,7 +25,6 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -46,6 +42,9 @@ from .responsive import ResponsiveMetrics, install_application_responsive_sizing
 # изменяются — уменьшается только отображаемое представление.
 DISPLAY_FULL_RES_THRESHOLD = 0.5
 DISPLAY_HALF_RES_SCALE = 0.5
+# Неизменяемое значение рабочей границы для фиксированной модели.
+MODEL_MARGIN_PERCENT = 8.0
+APPROVED_MODEL_NAME = "NN:colony_seg"
 
 
 def _composite_bgr(
@@ -237,14 +236,153 @@ class ImageLabel(QLabel):
         self.setMinimumSize(0, 0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._original_pixmap = None
+        self._roi_info: PetriInfo | None = None
+        self._drag_roi = False
+        self._roi_changed_callback = None
+        self._drag_offset = None
+        self.setMouseTracking(True)
 
     def set_image(self, pixmap: QPixmap):
         self._original_pixmap = pixmap
         self._update_scaled_pixmap()
 
+    def set_roi(self, petri_info: PetriInfo | None):
+        self._roi_info = petri_info
+        self.update()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_scaled_pixmap()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._roi_info is None or self._original_pixmap is None:
+            return
+        target = self._displayed_image_rect()
+        if target.isEmpty():
+            return
+        scale = target.width() / self._roi_info.image_shape[1]
+        center_x = target.x() + self._roi_info.cx * scale
+        center_y = target.y() + self._roi_info.cy * scale
+        radius = self._roi_info.radius * scale
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(Qt.GlobalColor.cyan, 2))
+        painter.drawEllipse(
+            round(center_x - radius),
+            round(center_y - radius),
+            round(radius * 2),
+            round(radius * 2),
+        )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Qt.GlobalColor.white, 1))
+        painter.drawLine(
+            round(center_x - 6), round(center_y), round(center_x + 6), round(center_y)
+        )
+        painter.drawLine(
+            round(center_x), round(center_y - 6), round(center_x), round(center_y + 6)
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._roi_contains(
+            event.position().toPoint()
+        ):
+            self._drag_roi = True
+            point = event.position().toPoint()
+            self._drag_offset = (
+                self._roi_info.cx - self._widget_to_image_x(point.x()),
+                self._roi_info.cy - self._widget_to_image_y(point.y()),
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_roi and self._roi_info is not None:
+            self._move_roi_to(event.position().toPoint())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_roi:
+            self._drag_roi = False
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _displayed_image_rect(self):
+        if self._roi_info is None:
+            pixmap = self.pixmap()
+            if pixmap is None or pixmap.isNull():
+                return self.rect()
+            return pixmap.rect().translated(
+                self.contentsRect().center() - pixmap.rect().center()
+            )
+        scale = min(
+            self.contentsRect().width() / self._roi_info.image_shape[1],
+            self.contentsRect().height() / self._roi_info.image_shape[0],
+        )
+        width = max(1, round(self._roi_info.image_shape[1] * scale))
+        height = max(1, round(self._roi_info.image_shape[0] * scale))
+        return QRect(
+            self.contentsRect().center().x() - width // 2,
+            self.contentsRect().center().y() - height // 2,
+            width,
+            height,
+        )
+
+    def _roi_contains(self, point):
+        if self._roi_info is None:
+            return False
+        image_rect = self._displayed_image_rect()
+        if not image_rect.contains(point):
+            return False
+        center_x = (
+            image_rect.x()
+            + self._roi_info.cx * image_rect.width() / self._roi_info.image_shape[1]
+        )
+        center_y = (
+            image_rect.y()
+            + self._roi_info.cy * image_rect.height() / self._roi_info.image_shape[0]
+        )
+        radius = (
+            self._roi_info.radius * image_rect.width() / self._roi_info.image_shape[1]
+        )
+        return (point.x() - center_x) ** 2 + (point.y() - center_y) ** 2 <= radius**2
+
+    def _move_roi_to(self, point):
+        image_rect = self._displayed_image_rect()
+        if image_rect.isEmpty():
+            return
+        info = self._roi_info
+        cx = self._widget_to_image_x(point.x())
+        cy = self._widget_to_image_y(point.y())
+        if self._drag_offset is not None:
+            cx += self._drag_offset[0]
+            cy += self._drag_offset[1]
+        radius = info.radius
+        cx = min(max(cx, radius), info.image_shape[1] - radius - 1)
+        cy = min(max(cy, radius), info.image_shape[0] - radius - 1)
+        updated = PetriInfo(cx, cy, radius, info.image_shape)
+        if updated != info:
+            self._roi_info = updated
+            self.update()
+            if self._roi_changed_callback is not None:
+                self._roi_changed_callback(updated)
+
+    def _widget_to_image_x(self, x):
+        image_rect = self._displayed_image_rect()
+        return round(
+            (x - image_rect.x()) * self._roi_info.image_shape[1] / image_rect.width()
+        )
+
+    def _widget_to_image_y(self, y):
+        image_rect = self._displayed_image_rect()
+        return round(
+            (y - image_rect.y()) * self._roi_info.image_shape[0] / image_rect.height()
+        )
 
     def _update_scaled_pixmap(self):
         if self._original_pixmap:
@@ -254,6 +392,7 @@ class ImageLabel(QLabel):
                 Qt.TransformationMode.SmoothTransformation,
             )
             self.setPixmap(scaled)
+            self.update()
 
 
 class AnalysisWindow(QMainWindow):
@@ -269,12 +408,14 @@ class AnalysisWindow(QMainWindow):
         self.petri_mask = None
         self.petri_info: PetriInfo | None = None
         self.analysis_results = None
+        self._analysis_generation = 0
+        self._analysis_worker_running = False
         self._analysis_operation: BackgroundOperation | None = None
         self._init_operation: BackgroundOperation | None = None
         self._save_operation: BackgroundOperation | None = None
         self._display_operation: BackgroundOperation | None = None
         self._analysis_busy = False
-        self._analysis_kind = "classic"
+        self._analysis_kind = "algorithm"
         self._closing = False
         self._pending_closes = 0
         # Поколение представления: устаревшие результаты фоновых операций
@@ -369,8 +510,7 @@ class AnalysisWindow(QMainWindow):
         self.controls_layout.setSpacing(15)
 
         self._create_view_controls(self.controls_layout)
-        self._create_geometry_controls(self.controls_layout)
-        self._create_algorithm_controls(self.controls_layout)
+        self._create_analysis_controls(self.controls_layout)
         self._create_results_panel(self.controls_layout)
         self._create_action_buttons(self.controls_layout)
         self.controls_layout.addStretch()
@@ -440,6 +580,10 @@ class AnalysisWindow(QMainWindow):
         vl.addWidget(self.image_header)
 
         self.image_label = ImageLabel()
+        self.image_label._roi_changed_callback = self._on_roi_changed
+        self.image_label.setToolTip(
+            "Перетащите круг мышью, чтобы изменить центр области"
+        )
         vl.addWidget(self.image_label, stretch=1)
 
         self.status_label = QLabel("Готов к работе")
@@ -479,122 +623,26 @@ class AnalysisWindow(QMainWindow):
         self.show_area_overlay.stateChanged.connect(self._update_display)
         vl.addWidget(self.show_area_overlay)
 
-        self.algorithm_combo = QComboBox()
-        self._load_analysis_algorithms()
-        vl.addWidget(QLabel("Алгоритм распознавания:"))
-        vl.addWidget(self.algorithm_combo)
-        self.algorithm_combo.currentIndexChanged.connect(self._on_algorithm_changed)
-
-        layout.addWidget(group)
-
-    def _create_geometry_controls(self, layout: QVBoxLayout):
-        group = QGroupBox("📏 Геометрия чашки")
-        vl = QFormLayout(group)
-
-        self.spin_x = QSpinBox()
-        self.spin_x.setRange(0, 5000)
-        self.spin_x.setSuffix(" px")
-        self.spin_x.valueChanged.connect(self._on_geometry_changed)
-        vl.addRow("Центр X:", self.spin_x)
-
-        self.spin_y = QSpinBox()
-        self.spin_y.setRange(0, 5000)
-        self.spin_y.setSuffix(" px")
-        self.spin_y.valueChanged.connect(self._on_geometry_changed)
-        vl.addRow("Центр Y:", self.spin_y)
-
+        radius_row = QHBoxLayout()
+        radius_row.addWidget(QLabel("Радиус, px:"))
         self.spin_radius = QSpinBox()
-        self.spin_radius.setRange(10, 3000)
-        self.spin_radius.setSuffix(" px")
-        self.spin_radius.valueChanged.connect(self._on_geometry_changed)
-        vl.addRow("Радиус:", self.spin_radius)
-
-        self.btn_reset_geometry = QPushButton("Сбросить к авто-поиску")
-        self.btn_reset_geometry.setStyleSheet("background-color: #45475a;")
-        self.btn_reset_geometry.clicked.connect(self._reset_geometry)
-        vl.addRow(self.btn_reset_geometry)
-
+        self.spin_radius.setRange(1, 1)
+        self.spin_radius.setEnabled(False)
+        self.spin_radius.valueChanged.connect(self._on_roi_radius_changed)
+        radius_row.addWidget(self.spin_radius)
+        radius_row.addStretch()
+        vl.addLayout(radius_row)
         layout.addWidget(group)
 
-    def _create_algorithm_controls(self, layout: QVBoxLayout):
-        group = QGroupBox("⚙️ Параметры алгоритма")
+    def _create_analysis_controls(self, layout: QVBoxLayout):
+        group = QGroupBox("🧠 Анализ")
         vl = QVBoxLayout(group)
-
-        # Чувствительность
-        vl.addWidget(QLabel("Чувствительность:"))
-        h_sens = QHBoxLayout()
-        self.slider_sens = QSlider(Qt.Orientation.Horizontal)
-        self.slider_sens.setRange(1, 100)
-        self.slider_sens.setValue(50)
-        self.slider_sens.valueChanged.connect(
-            lambda v: self.label_sens.setText(f"{v}%")
-        )
-        self.label_sens = QLabel("50%")
-        h_sens.addWidget(self.slider_sens)
-        h_sens.addWidget(self.label_sens)
-        vl.addLayout(h_sens)
-
-        # Контраст
-        vl.addWidget(QLabel("Усиление контраста:"))
-        h_cont = QHBoxLayout()
-        self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
-        self.slider_contrast.setRange(5, 30)
-        self.slider_contrast.setValue(10)
-        self.slider_contrast.valueChanged.connect(
-            lambda v: self.label_contrast.setText(f"{v / 10:.1f}x")
-        )
-        self.label_contrast = QLabel("1.0x")
-        h_cont.addWidget(self.slider_contrast)
-        h_cont.addWidget(self.label_contrast)
-        vl.addLayout(h_cont)
-
-        # Отступ
-        vl.addWidget(QLabel("Отступ от края (%):"))
-        self.spin_margin = QDoubleSpinBox()
-        self.spin_margin.setRange(0, 30)
-        self.spin_margin.setValue(8.0)
-        vl.addWidget(self.spin_margin)
-
-        # Мин размер
-        vl.addWidget(QLabel("Мин. размер колонии (px):"))
-        self.spin_min_size = QSpinBox()
-        self.spin_min_size.setRange(1, 1000)
-        self.spin_min_size.setValue(50)
-        vl.addWidget(self.spin_min_size)
-
-        # --- Секция сплошных зон (НОВАЯ) ---
-        fill_frame = QFrame()
-        fill_frame.setStyleSheet("background-color: #313244; border-radius: 6px;")
-        fill_layout = QVBoxLayout(fill_frame)
-
-        self.chk_solid_fill = QCheckBox("💧 Заполнять сплошные зоны")
-        self.chk_solid_fill.setToolTip(
-            "Включите для сплошных мазков бактерий. Выключите для отдельных мелких колоний."
-        )
-        fill_layout.addWidget(self.chk_solid_fill)
-
-        fill_h = QHBoxLayout()
-        fill_h.addWidget(QLabel("Сила заполнения:"))
-        self.spin_fill_strength = QSpinBox()
-        self.spin_fill_strength.setRange(1, 100)
-        self.spin_fill_strength.setValue(15)
-        self.spin_fill_strength.setToolTip(
-            "Радиус объединения. Увеличьте, если остаются черные дыры внутри пятен."
-        )
-        fill_h.addWidget(self.spin_fill_strength)
-        fill_layout.addLayout(fill_h)
-
-        vl.addWidget(fill_frame)
-        # ------------------------------------
-
-        btn_apply = QPushButton("🔄 Пересчитать")
-        btn_apply.setStyleSheet(
+        self.btn_apply = QPushButton("🔄 Пересчитать")
+        self.btn_apply.setStyleSheet(
             "background-color: #89b4fa; color: #1e1e2e; font-weight: bold; margin-top: 10px;"
         )
-        btn_apply.clicked.connect(self._run_colony_analysis_only)
-        self.btn_apply = btn_apply
-        vl.addWidget(btn_apply)
-
+        self.btn_apply.clicked.connect(self._run_colony_analysis_only)
+        vl.addWidget(self.btn_apply)
         layout.addWidget(group)
 
     def _create_results_panel(self, layout: QVBoxLayout):
@@ -619,88 +667,73 @@ class AnalysisWindow(QMainWindow):
 
     # --- ЛОГИКА ---
 
-    def _run_full_analysis(self):
-        """Авто-поиск чашки и анализ выполняются вне GUI-потока (5.1/5.2)."""
-        if self._closing or self.original_image is None:
-            return
-        if self._analysis_busy:
-            return
-        self._view_generation += 1
-        generation = self._view_generation
-        self.status_label.setText("Поиск чашки Петри...")
-        self.statusBar().showMessage("Поиск чашки Петри...")
-        operation = BackgroundOperation(
-            self._locate_work, generation=generation, parent=self
-        )
-        operation.status_changed.connect(self.status_label.setText)
-        operation.result_ready.connect(self._on_locate_finished)
-        operation.error_raised.connect(self._on_locate_failed)
-        self._init_operation = operation
-        operation.start(image=self.original_image)
-
-    def _locate_work(self, ctx, image):
-        """Worker: повторный поиск чашки Петри."""
-        ctx.status("Поиск чашки Петри...")
-        return self.controller.find_petri_dish(image)
-
-    def _on_locate_finished(self, result, generation: int):
-        if generation != self._view_generation:
-            return  # устаревший результат
-        self._apply_petri_result(result[0], result[1])
-
-    def _on_locate_failed(self, message: str, generation: int):
-        if generation != self._view_generation:
-            return
-        self.status_label.setText("Ошибка поиска чашки")
-        self.statusBar().showMessage("Ошибка поиска чашки")
-        QMessageBox.critical(self, "Ошибка поиска чашки", message)
-
     def _apply_petri_result(self, petri_mask, petri_info):
         self.petri_mask = petri_mask
         self.petri_info = petri_info
-        if self.petri_info:
-            self._updating_ui = True
-            self.spin_x.setValue(self.petri_info.cx)
-            self.spin_y.setValue(self.petri_info.cy)
-            self.spin_radius.setValue(self.petri_info.radius)
-            self._updating_ui = False
-            self._run_colony_analysis_only()
-        else:
+        self.image_label.set_roi(None)
+        self.spin_radius.setEnabled(False)
+        if self.petri_info is None or self.petri_mask is None:
+            self.status_label.setText("Чашка Петри не найдена")
+            self.statusBar().showMessage("Анализ невозможен: чашка Петри не найдена")
             QMessageBox.warning(
-                self, "Ошибка", "Чашка Петри не найдена. Настройте вручную."
+                self,
+                "Чашка Петри не найдена",
+                "Не удалось автоматически определить чашку Петри. "
+                "Проверьте качество и расположение снимка, затем откройте его снова.",
             )
-            h, w = self.original_image.shape[:2]
-            self.petri_info = PetriInfo(
-                cx=w // 2,
-                cy=h // 2,
-                radius=int(min(w, h) * 0.4),
-                image_shape=(h, w),
-            )
-            self._updating_ui = True
-            self.spin_x.setValue(w // 2)
-            self.spin_y.setValue(h // 2)
-            self.spin_radius.setValue(int(min(w, h) * 0.4))
-            self._updating_ui = False
-
-    def _on_geometry_changed(self):
-        if self._updating_ui:
             return
-        cx = self.spin_x.value()
-        cy = self.spin_y.value()
-        r = self.spin_radius.value()
-        h, w = self.original_image.shape[:2]
-        self.petri_info = PetriInfo(
-            cx=cx,
-            cy=cy,
-            radius=r,
-            image_shape=(h, w),
-        )
-        self.petri_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(self.petri_mask, (cx, cy), r, 255, -1)
-        self._update_display()
+        self._set_roi_info(self.petri_info)
+        self._run_colony_analysis_only()
 
-    def _reset_geometry(self):
-        self._run_full_analysis()
+    def _set_roi_info(self, info: PetriInfo):
+        h, w = info.image_shape
+        max_radius = max(1, min((w - 1) // 2, (h - 1) // 2))
+        bounded_radius = min(max(info.radius, 1), max_radius)
+        cx = min(max(info.cx, bounded_radius), w - bounded_radius - 1)
+        cy = min(max(info.cy, bounded_radius), h - bounded_radius - 1)
+        self.petri_info = PetriInfo(cx, cy, bounded_radius, info.image_shape)
+        self.petri_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(self.petri_mask, self.petri_info.center, bounded_radius, 255, -1)
+        self.image_label.set_roi(self.petri_info)
+        self.spin_radius.blockSignals(True)
+        self.spin_radius.setRange(1, max_radius)
+        self.spin_radius.setValue(bounded_radius)
+        self.spin_radius.setEnabled(True)
+        self.spin_radius.blockSignals(False)
+        if self.original_image is not None:
+            self._update_display()
+
+    def _on_roi_changed(self, info: PetriInfo):
+        self._set_roi_info(info)
+        self._invalidate_analysis_for_roi_change()
+
+    def _on_roi_radius_changed(self, radius: int):
+        if self.petri_info is None:
+            return
+        info = PetriInfo(
+            self.petri_info.cx,
+            self.petri_info.cy,
+            radius,
+            self.petri_info.image_shape,
+        )
+        self._set_roi_info(info)
+        self._invalidate_analysis_for_roi_change()
+
+    def _invalidate_analysis_for_roi_change(self):
+        self._analysis_generation += 1
+        self.analysis_results = None
+        if self._analysis_worker_running and self._analysis_operation is not None:
+            self._analysis_operation.cancel()
+        self._analysis_busy = False
+        self.btn_apply.setEnabled(not self._analysis_worker_running)
+        self.progress_bar.hide()
+        self.controller.set_algorithm_mask(
+            np.zeros(self.petri_mask.shape, dtype=np.uint8)
+        )
+        self.text_results.setText("Область изменена. Нажмите «Пересчитать».")
+        self.status_label.setText("Область анализа изменена")
+        self.statusBar().showMessage("Проверьте область и нажмите «Пересчитать»")
+        self._update_display()
 
     def _run_colony_analysis_only(self):
         """Запуск анализа: классический или выбранный алгоритм — в worker (5.2)."""
@@ -709,39 +742,17 @@ class AnalysisWindow(QMainWindow):
         if not self.petri_info or self.original_image is None:
             return
 
-        if self._analysis_busy:
+        if self._analysis_worker_running or self._analysis_busy:
             return
 
-        algorithm = self._selected_algorithm()
-        self._analysis_kind = "algorithm" if algorithm is not None else "classic"
-        algorithm_name = (
-            self.algorithm_combo.currentData()
-            if algorithm is not None
-            else "__classic__"
-        )
-        params = AnalysisParams(
-            sensitivity=self.slider_sens.value() / 100.0,
-            contrast=self.slider_contrast.value() / 10.0,
-            margin_percent=self.spin_margin.value(),
-            min_colony_size=self.spin_min_size.value(),
-            solid_fill=self.chk_solid_fill.isChecked(),
-            fill_strength=self.spin_fill_strength.value(),
-        )
-        margin = self.spin_margin.value()
-
+        self._analysis_kind = "algorithm"
         self._analysis_busy = True
+        self._analysis_worker_running = True
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self.btn_apply.setEnabled(False)
-        self.algorithm_combo.setEnabled(False)
-        for widget in (self.spin_x, self.spin_y, self.spin_radius, self.spin_margin):
-            widget.setEnabled(False)
-        if algorithm is not None:
-            self.statusBar().showMessage(f"Запуск {algorithm.name}…")
-            self.status_label.setText(f"Запуск {algorithm.name}…")
-        else:
-            self.status_label.setText("Анализ колоний...")
-            self.statusBar().showMessage("Анализ колоний...")
+        self.statusBar().showMessage(f"Запуск {APPROVED_MODEL_NAME}…")
+        self.status_label.setText(f"Запуск {APPROVED_MODEL_NAME}…")
 
         operation = BackgroundOperation(
             self._analysis_work, generation=self._view_generation, parent=self
@@ -750,35 +761,29 @@ class AnalysisWindow(QMainWindow):
         operation.result_ready.connect(self._on_analysis_finished)
         operation.error_raised.connect(self._on_analysis_failed)
         operation.cancellation_confirmed.connect(self._on_analysis_cancelled)
+        operation.finished.connect(self._on_analysis_worker_finished)
         self._analysis_operation = operation
-        # Входы фиксируются snapshot'ом: маска/геометрия на момент запуска.
+        # Снимок фиксирует входы операции; модель и порог выбраны приложением.
         operation.start(
             image=self.original_image,
-            petri_mask=self.petri_mask,
+            petri_mask=self.petri_mask.copy(),
             petri_info=self.petri_info,
-            params=params,
-            margin=margin,
-            algorithm_name=algorithm_name,
+            analysis_generation=self._analysis_generation,
         )
 
-    def _analysis_work(
-        self, ctx, image, petri_mask, petri_info, params, margin, algorithm_name
-    ):
-        """Worker: классический анализ или инференс выбранного алгоритма."""
-        if algorithm_name == "__classic__":
-            ctx.status("Анализ колоний...")
-            results = self.controller.analyze(
-                image,
-                petri_mask,
-                params=params,
-                petri_info=petri_info,
-                blur_size=5,
+    def _analysis_work(self, ctx, image, petri_mask, petri_info, analysis_generation):
+        """Worker: инференс единственной утверждённой bundled-модели."""
+        from testing.onnx_algorithm import register_bundled_models
+
+        bundled_models = register_bundled_models()
+        algorithm = next(
+            (model for model in bundled_models if model.name == APPROVED_MODEL_NAME),
+            None,
+        )
+        if algorithm is None:
+            raise RuntimeError(
+                f"Встроенная утверждённая модель {APPROVED_MODEL_NAME} не найдена."
             )
-            return {"kind": "classic", "results": results}
-
-        from testing.registry import get_algorithm
-
-        algorithm = get_algorithm(algorithm_name)
         ctx.status(f"Инференс: {algorithm.name}")
 
         def _progress(completed, total):
@@ -790,10 +795,20 @@ class AnalysisWindow(QMainWindow):
             petri_mask,
             algorithm,
             petri_info=petri_info,
-            margin_percent=margin,
+            margin_percent=MODEL_MARGIN_PERCENT,
             progress_callback=_progress,
         )
-        return {"kind": "algorithm", "results": result, "mask": mask}
+        return {
+            "kind": "algorithm",
+            "results": result,
+            "mask": mask,
+            "analysis_generation": analysis_generation,
+        }
+
+    def _on_analysis_worker_finished(self, generation: int):
+        self._analysis_worker_running = False
+        if not self._analysis_busy and not self._closing:
+            self.btn_apply.setEnabled(True)
 
     def _on_analysis_progress(self, completed, total):
         self.progress_bar.setRange(0, max(1, total))
@@ -806,8 +821,10 @@ class AnalysisWindow(QMainWindow):
         self._cleanup_analysis_ui()
         if generation != self._view_generation:
             return  # устаревший результат
-        if payload["kind"] == "algorithm":
-            self.controller.set_algorithm_mask(payload["mask"])
+        if payload["analysis_generation"] != self._analysis_generation:
+            self.text_results.setText("Область изменена. Нажмите «Пересчитать».")
+            return  # геометрия ROI изменилась во время инференса
+        self.controller.set_algorithm_mask(payload["mask"])
         result = payload["results"]
         self.analysis_results = result
         self.text_results.setText(
@@ -823,12 +840,8 @@ class AnalysisWindow(QMainWindow):
         self._cleanup_analysis_ui()
         if generation != self._view_generation:
             return
-        if self._analysis_kind == "algorithm":
-            self.statusBar().showMessage("Ошибка нейросетевого анализа")
-            title = "Ошибка модели"
-        else:
-            self.statusBar().showMessage("Ошибка классического анализа")
-            title = "Ошибка алгоритма"
+        self.statusBar().showMessage("Ошибка нейросетевого анализа")
+        title = "Ошибка модели"
         self.status_label.setText("Ошибка анализа")
         QMessageBox.critical(self, title, message)
 
@@ -841,10 +854,7 @@ class AnalysisWindow(QMainWindow):
 
     def _cleanup_analysis_ui(self):
         self._analysis_busy = False
-        self.btn_apply.setEnabled(True)
-        self.algorithm_combo.setEnabled(True)
-        for widget in (self.spin_x, self.spin_y, self.spin_radius, self.spin_margin):
-            widget.setEnabled(True)
+        self.btn_apply.setEnabled(not self._analysis_worker_running)
         self.progress_bar.hide()
 
     def closeEvent(self, event):
@@ -881,35 +891,6 @@ class AnalysisWindow(QMainWindow):
             self._closing = False
             self.close()
 
-    def _load_analysis_algorithms(self):
-        from testing.onnx_algorithm import register_bundled_models
-        from testing.registry import list_algorithms
-
-        register_bundled_models()
-        self.algorithm_combo.addItem("Классический (параметры ниже)", "__classic__")
-        for name in list_algorithms():
-            self.algorithm_combo.addItem(name, name)
-
-    def _selected_algorithm(self):
-        name = self.algorithm_combo.currentData()
-        if not name or name == "__classic__":
-            return None
-        from testing.registry import get_algorithm
-
-        return get_algorithm(name)
-
-    def _on_algorithm_changed(self, _index):
-        name = self.algorithm_combo.currentData()
-        uses_classic_controls = name == "__classic__"
-        for widget in (
-            self.slider_sens,
-            self.slider_contrast,
-            self.spin_min_size,
-            self.chk_solid_fill,
-            self.spin_fill_strength,
-        ):
-            widget.setEnabled(uses_classic_controls)
-
     def _update_display(self):
         """Готовит отображаемое представление в worker (задача 5.3).
 
@@ -925,14 +906,8 @@ class AnalysisWindow(QMainWindow):
         debug = self.controller.debug_images
         preprocessed = debug.get("preprocessed")
         colony_mask = self.controller.colony_mask
-        # binary-слой классического пути приоритетнее маски колоний:
-        # сохраняем прежнюю семантику отображения бинарного режима.
-        binary_layer = debug.get("binary")
-        if self.view_mode_combo.currentIndex() == 3 and binary_layer is not None:
-            colony_mask = binary_layer
-
         viewport = self.image_label.size()
-        margin = self.spin_margin.value()
+        margin = MODEL_MARGIN_PERCENT
         mode = self.view_mode_combo.currentIndex()
         show_contour = self.show_petri_contour.isChecked()
         show_overlay = self.show_area_overlay.isChecked()
@@ -985,6 +960,7 @@ class AnalysisWindow(QMainWindow):
         h, w = rgb.shape[:2]
         q_image = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         self.image_label.set_image(QPixmap.fromImage(q_image))
+        self.image_label.set_roi(self.petri_info)
 
     def _save_result(self):
         if self.original_image is None:

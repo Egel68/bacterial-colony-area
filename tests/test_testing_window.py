@@ -15,11 +15,15 @@ def window(qtbot):
     return win
 
 
-def test_window_opens_with_algorithms(qtbot, window):
+def test_internal_window_opens_with_algorithms_and_model_loading(qtbot, window):
     assert window.isVisible()
+    assert "Внутреннее окно" in TestingWindow.__doc__
     assert len(window._algo_checkboxes) >= 4
     names = list(window._algo_checkboxes)
     assert "ClassicDefault" in names
+    # Возможности остаются доступны разработчикам при отдельном запуске окна.
+    assert window.btn_load_model.isVisible()
+    assert window.btn_load_model.text().startswith("⬇️ Загрузить модель")
 
 
 def test_results_table_header_stretches(qtbot, window):
