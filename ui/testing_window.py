@@ -235,7 +235,7 @@ class _RunWorker(QObject):
 
 
 class TestingWindow(QMainWindow):
-    """Окно тестирования алгоритмов детекции колоний."""
+    """Внутреннее окно разработки/валидации, не связанное с главным GUI."""
 
     __test__ = False  # Не коллектировать pytest'ом как тестовый класс
 
@@ -677,3 +677,12 @@ class TestingWindow(QMainWindow):
             return
         self._closing = False
         self.close()
+
+
+if __name__ == "__main__":
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication([])
+    window = TestingWindow()
+    window.show()
+    raise SystemExit(app.exec())

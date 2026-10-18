@@ -301,8 +301,8 @@ def synthetic_analysis(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         AnalysisController,
-        "analyze",
-        lambda _self, *_args, **_kwargs: result,
+        "calculate_algorithm_result",
+        lambda _self, image, petri_mask, algorithm, **kwargs: (result, mask.copy()),
     )
     return image_path
 
@@ -319,8 +319,14 @@ def test_main_window_compact_and_standard_layout(qtbot, size):
         window.open_button,
         window.analyze_button,
         window.label_button,
-        window.testing_button,
     ]
+    assert not hasattr(window, "testing_button")
+    assert not hasattr(window, "testing_window")
+    button_labels = [
+        button.text().lower() for button in window.findChildren(QPushButton)
+    ]
+    assert not any("тестирован" in label for label in button_labels)
+    assert not any("модель" in label and "загруз" in label for label in button_labels)
     for action in actions:
         assert action.isVisible()
         _assert_inside(action, window)
@@ -404,26 +410,15 @@ def test_main_window_preserves_startup_size_and_primary_actions_are_operable(
             self.exec_calls += 1
             return int(QDialog.DialogCode.Rejected)
 
-    class _FakeTestingWindow:
-        def __init__(self, parent):
-            self.parent = parent
-            self.shown = False
-
-        def show(self):
-            self.shown = True
-
     dialogs = []
     monkeypatch.setattr("labeling.session_manager.SessionManager", lambda: object())
     monkeypatch.setattr("ui.main_window.LabelingSessionDialog", _FakeDialog)
-    monkeypatch.setattr("ui.testing_window.TestingWindow", _FakeTestingWindow)
     window.label_button.click()
-    window.testing_button.click()
 
     assert len(dialogs) == 1 and dialogs[0].exec_calls == 1
     assert window.label_button.isVisible()
-    assert window.testing_button.isVisible()
-    assert window.testing_window.parent is window
-    assert window.testing_window.shown
+    assert not hasattr(window, "testing_button")
+    assert not hasattr(window, "testing_window")
 
 
 @pytest.mark.gui
@@ -436,22 +431,14 @@ def test_analysis_controls_are_scroll_reachable_at_supported_sizes(
 
     assert window.minimumSize().width() <= size[0]
     assert window.minimumSize().height() <= size[1]
-    assert window.controls_scroll_area.verticalScrollBar().maximum() > 0
+    scroll = window.controls_scroll_area.verticalScrollBar()
+    # Уменьшенный набор фиксированных NN-контролов может полностью помещаться
+    # при крупном окне; в компактных размерах scroll остается доступным.
+    assert scroll.maximum() > 0 or size == (1280, 800)
     controls = [
         window.view_mode_combo,
         window.show_petri_contour,
         window.show_area_overlay,
-        window.algorithm_combo,
-        window.spin_x,
-        window.spin_y,
-        window.spin_radius,
-        window.btn_reset_geometry,
-        window.slider_sens,
-        window.slider_contrast,
-        window.spin_margin,
-        window.spin_min_size,
-        window.chk_solid_fill,
-        window.spin_fill_strength,
         window.btn_apply,
         window.text_results,
         window.btn_save,
@@ -465,6 +452,10 @@ def test_analysis_controls_are_scroll_reachable_at_supported_sizes(
         assert control.isVisible()
     assert window.image_label.width() > 0 and window.image_label.height() > 0
     _assert_no_interactive_overlap(window.controls_widget)
+    assert not hasattr(window, "algorithm_combo")
+    assert not hasattr(window, "slider_sens")
+    assert not hasattr(window, "spin_x")
+    assert not hasattr(window, "spin_radius")
 
 
 @pytest.mark.gui
