@@ -25,15 +25,22 @@ class _FakeSession:
         return [np.ones((batch, 1, h, w), dtype=np.float32) * self.output_value]
 
 
-def _fake_module(output_value=0.9, providers_seen=None):
+def _fake_module(output_value=0.9, providers_seen=None, sess_options_seen=None):
     """Возвращает фейковый модуль onnxruntime."""
 
-    def create_session(path, providers=None):
+    def create_session(path, providers=None, sess_options=None):
         if providers_seen is not None:
             providers_seen.append(providers)
+        if sess_options_seen is not None:
+            sess_options_seen.append(sess_options)
         return _FakeSession(path, output_value)
 
-    return SimpleNamespace(InferenceSession=create_session)
+    return SimpleNamespace(
+        InferenceSession=create_session,
+        SessionOptions=lambda: SimpleNamespace(
+            intra_op_num_threads=0, inter_op_num_threads=0
+        ),
+    )
 
 
 @pytest.fixture

@@ -58,12 +58,22 @@ class OnnxModelAlgorithm(BaseDetectionAlgorithm):
                 "нейросетевых моделей: uv pip install onnxruntime"
             ) from e
 
+        # Лимиты потоков ONNX Runtime — из общей ресурсной политики (задача 2.6).
+        from .resource_policy import onnx_session_options
+
         self._session = onnxruntime.InferenceSession(
-            self.model_path, providers=["CPUExecutionProvider"]
+            self.model_path,
+            sess_options=onnx_session_options(),
+            providers=["CPUExecutionProvider"],
         )
         return self._session
 
-    def detect(self, image: np.ndarray, is_cropped: bool = False) -> np.ndarray:
+    def detect(
+        self,
+        image: np.ndarray,
+        is_cropped: bool = False,
+        context=None,
+    ) -> np.ndarray:
         session = self._get_session()
         input_name = session.get_inputs()[0].name
 

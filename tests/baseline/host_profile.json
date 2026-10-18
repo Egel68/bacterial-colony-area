@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-03T20:35:00.433997+00:00",
+  "os": {
+    "system": "Linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "machine": "x86_64"
+  },
+  "cpu": {
+    "model": "AMD Ryzen 7 4800HS with Radeon Graphics",
+    "logical_count": 12,
+    "physical_count": 6,
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "quota": null
+  },
+  "memory": {
+    "total_bytes": 10427707392,
+    "available_bytes": 8777891840
+  },
+  "runtimes": {
+    "opencv": "4.13.0",
+    "onnxruntime": "1.27.0",
+    "numpy": "2.5.0",
+    "python": "3.13.14"
+  },
+  "git_revision": "d9059ffd91ac04ca5b1d4d31047a66997ab78be4",
+  "dataset": {
+    "root": "datasets/22022540",
+    "samples": [
+      {
+        "id": "sp21_img24.jpg",
+        "width": 5927,
+        "height": 5968
+      },
+      {
+        "id": "sp21_img41.jpg",
+        "width": 5942,
+        "height": 5920
+      },
+      {
+        "id": "sp21_img38.jpg",
+        "width": 5824,
+        "height": 5919
+      },
+      {
+        "id": "sp21_img19.jpg",
+        "width": 5833,
+        "height": 5856
+      },
+      {
+        "id": "sp21_img37.jpg",
+        "width": 5848,
+        "height": 5829
+      }
+    ],
+    "image_count": 369,
+    "max_pixels": 35372336,
+    "min_pixels": 4549568
+  },
+  "warm_cache": true,
+  "io_counters": {
+    "available": true,
+    "read_bytes_at_capture": 4415442944
+  }
+}

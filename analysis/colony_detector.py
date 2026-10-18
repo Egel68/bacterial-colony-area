@@ -11,6 +11,8 @@ import numpy as np
 from .geometry import PetriInfo
 from .image_processor import ImageProcessor
 from .params import AnalysisParams
+from .profiling import measure_stage
+from .sample_context import SampleContext
 
 
 class ColonyDetector:
@@ -34,6 +36,12 @@ class ColonyDetector:
         Обнаружение чашки Петри.
         Использует тот факт, что края чашки на этих фото - самые яркие объекты (блики).
         """
+        with measure_stage("dish_search"):
+            return self._detect_petri_dish_impl(image)
+
+    def _detect_petri_dish_impl(
+        self, image: np.ndarray
+    ) -> tuple[Optional[np.ndarray], Optional[PetriInfo]]:
         gray = self.processor.to_grayscale(image)
         h, w = gray.shape
 
@@ -140,6 +148,7 @@ class ColonyDetector:
         params: AnalysisParams,
         petri_info: Optional[PetriInfo] = None,
         blur_size: int = 5,
+        context: Optional[SampleContext] = None,
     ) -> tuple[np.ndarray, Dict]:
 
         if petri_info:
@@ -151,17 +160,30 @@ class ColonyDetector:
 
         channel = self.processor.extract_green_channel(image)
 
-        clip_limit = 2.0 * params.contrast
-        enhanced = self.processor.apply_clahe(
-            channel, clip_limit=clip_limit, grid_size=8
+        # Контекст: переиспользуем инвариантную предобработку (diff) для одного
+        # снимка при совпадающем contrast/blur_size (задача 3.3).
+        cached_diff = (
+            context.get_preprocessed(params.contrast, blur_size)
+            if context is not None
+            else None
         )
+        if cached_diff is not None:
+            diff = cached_diff
+        else:
+            with measure_stage("classic_preprocess"):
+                clip_limit = 2.0 * params.contrast
+                enhanced = self.processor.apply_clahe(
+                    channel, clip_limit=clip_limit, grid_size=8
+                )
 
-        k_size = blur_size if blur_size % 2 == 1 else blur_size + 1
-        k_size = max(3, k_size)
-        denoised = cv2.medianBlur(enhanced, k_size)
+                k_size = blur_size if blur_size % 2 == 1 else blur_size + 1
+                k_size = max(3, k_size)
+                denoised = cv2.medianBlur(enhanced, k_size)
 
-        bg = cv2.GaussianBlur(denoised, (51, 51), 0)
-        diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
+                bg = cv2.GaussianBlur(denoised, (51, 51), 0)
+                diff = cv2.addWeighted(denoised, 1.5, bg, -0.5, 0)
+            if context is not None:
+                context.set_preprocessed(params.contrast, blur_size, diff)
         masked_diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
 
         valid_pixels = masked_diff[roi_mask > 0]
@@ -175,26 +197,31 @@ class ColonyDetector:
         thresh_val = mean_val + k * std_val
         thresh_val = max(mean_val + 5, min(thresh_val, 254))
 
-        _, binary = cv2.threshold(masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY)
-
-        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        clean_binary = cv2.morphologyEx(
-            binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
-        )
-
-        if params.solid_fill:
-            fill_k_size = max(3, params.fill_strength)
-            fill_kernel = cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
+        with measure_stage("threshold_morphology"):
+            _, binary = cv2.threshold(
+                masked_diff, int(thresh_val), 255, cv2.THRESH_BINARY
             )
-            clean_binary = cv2.morphologyEx(clean_binary, cv2.MORPH_CLOSE, fill_kernel)
 
-            contours = self._find_contours(clean_binary)
-            cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
-        else:
+            kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             clean_binary = cv2.morphologyEx(
-                clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
+                binary, cv2.MORPH_OPEN, kernel_morph, iterations=1
             )
+
+            if params.solid_fill:
+                fill_k_size = max(3, params.fill_strength)
+                fill_kernel = cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE, (fill_k_size, fill_k_size)
+                )
+                clean_binary = cv2.morphologyEx(
+                    clean_binary, cv2.MORPH_CLOSE, fill_kernel
+                )
+
+                contours = self._find_contours(clean_binary)
+                cv2.drawContours(clean_binary, contours, -1, 255, thickness=cv2.FILLED)
+            else:
+                clean_binary = cv2.morphologyEx(
+                    clean_binary, cv2.MORPH_CLOSE, kernel_morph, iterations=2
+                )
 
         final_mask = self._filter_components(
             clean_binary, min_size=params.min_colony_size
@@ -205,14 +232,24 @@ class ColonyDetector:
         return final_mask, debug_images
 
     def _filter_components(self, mask: np.ndarray, min_size: int) -> np.ndarray:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            mask, connectivity=8
-        )
-        filtered_mask = np.zeros_like(mask)
-        for i in range(1, num_labels):
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= min_size:
-                filtered_mask[labels == i] = 255
+        """Отбрасывает компоненты меньше min_size.
+
+        Векторизованный lookup вместо повторного прохода по меткам
+        (задача 3.2): каждая метка проверяется по таблице площадей
+        за один проход. Результат побитово эквивалентен прежнему циклу
+        (порядок нумерации компонентов детерминирован и сохранён).
+        """
+        with measure_stage("component_filtering"):
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+                mask, connectivity=8
+            )
+            if num_labels <= 1:
+                return np.zeros_like(mask)
+            # lookup[метка] = 255, если площадь >= min_size (фон 0 всегда отброшен).
+            keep = stats[1:, cv2.CC_STAT_AREA] >= min_size
+            lookup = np.zeros(num_labels, dtype=np.uint8)
+            lookup[1:] = keep.astype(np.uint8) * 255
+            filtered_mask = lookup[labels]
         return filtered_mask
 
     def count_colonies(self, colony_mask: np.ndarray) -> int:

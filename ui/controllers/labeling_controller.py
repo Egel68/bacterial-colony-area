@@ -60,13 +60,30 @@ class LabelingController:
         path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(path), mask)
 
-    def export_session_to_zip(self, session_dir: Path, output_path: Path) -> None:
+    def export_session_to_zip(
+        self,
+        session_dir: Path,
+        output_path: Path,
+        checkpoint=None,
+        progress=None,
+    ) -> None:
+        """Пакует сессию в ZIP.
+
+        `checkpoint` — кооперативная отмена между файлами;
+        `progress(done)` — уведомление о числе упакованных файлов.
+        """
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            done = 0
             for root_dir, dirs, files in os.walk(str(session_dir)):
                 for file in files:
+                    if checkpoint is not None:
+                        checkpoint()
                     full = Path(root_dir) / file
                     arcname = full.relative_to(session_dir.parent)
                     zf.write(str(full), str(arcname))
+                    done += 1
+                    if progress is not None:
+                        progress(done)
 
     def get_current_dir(self, session_dir: Path, mode: str) -> Path:
         if mode == "source":

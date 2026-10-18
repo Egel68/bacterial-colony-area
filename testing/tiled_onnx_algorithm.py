@@ -68,7 +68,12 @@ class TiledOnnxModelAlgorithm(BaseDetectionAlgorithm):
             available = onnxruntime.get_available_providers()
             if "CPUExecutionProvider" not in available:
                 raise RuntimeError("onnxruntime CPUExecutionProvider недоступен")
-            options = onnxruntime.SessionOptions()
+            # Лимиты потоков ONNX Runtime — из общей ресурсной политики (задача 2.6).
+            from .resource_policy import onnx_session_options
+
+            options = onnx_session_options()
+            if options is None:
+                options = onnxruntime.SessionOptions()
             self._session = onnxruntime.InferenceSession(
                 self.model_path,
                 sess_options=options,
@@ -76,7 +81,12 @@ class TiledOnnxModelAlgorithm(BaseDetectionAlgorithm):
             )
         return self._session
 
-    def detect(self, image: np.ndarray, is_cropped: bool = False) -> np.ndarray:
+    def detect(
+        self,
+        image: np.ndarray,
+        is_cropped: bool = False,
+        context=None,
+    ) -> np.ndarray:
         return self.detect_with_progress(image, is_cropped=is_cropped)
 
     def detect_with_progress(

@@ -1,8 +1,10 @@
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from .runner import (
     AllResults,
@@ -783,6 +785,58 @@ def generate_report(
 
     if stats_output:
         _export_stats_json(summary, all_results, stats_output)
+
+
+def generate_report_atomic(
+    all_results: AllResults,
+    output_path: str = "test_report.html",
+    *,
+    publish_check: Callable[[], None] | None = None,
+    **kwargs,
+) -> str:
+    """Генерация HTML-отчёта с атомарной публикацией (задача 7.3).
+
+    Отчёт сначала пишется во временный файл рядом с целевым и публикуется
+    `os.replace()` только после успешной генерации. Ошибка или отмена
+    (`publish_check` поднимает исключение) НЕ оставляет частичный файл под
+    окончательным именем и НЕ изменяет ранее существовавший отчёт.
+
+    `publish_check` — необязательная safe-точка между генерацией и
+    публикацией (например, `ctx.checkpoint` фоновой операции): отмена в
+    ней просто удаляет временный файл.
+
+    `stats_output`, если задан, публикуется атомарно аналогично.
+    Возвращает фактический опубликованный путь.
+    """
+    target = Path(output_path)
+    parent = target.parent if str(target.parent) else Path(".")
+    stats_target = kwargs.pop("stats_output", None)
+
+    def _make_temp(final: Path) -> Path:
+        fd, name = tempfile.mkstemp(
+            dir=str(parent), prefix=f".{final.name}.", suffix=".tmp"
+        )
+        os.close(fd)
+        return Path(name)
+
+    tmp_path = _make_temp(target)
+    stats_tmp = _make_temp(Path(stats_target)) if stats_target else None
+    if stats_tmp is not None:
+        kwargs["stats_output"] = str(stats_tmp)
+    try:
+        generate_report(all_results, output_path=str(tmp_path), **kwargs)
+        if publish_check is not None:
+            # Отмена между генерацией и публикацией: цель остаётся нетронутой.
+            publish_check()
+        if stats_tmp is not None:
+            os.replace(stats_tmp, Path(stats_target))
+        os.replace(tmp_path, target)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        if stats_tmp is not None:
+            stats_tmp.unlink(missing_ok=True)
+        raise
+    return str(target)
 
 
 def _export_stats_json(

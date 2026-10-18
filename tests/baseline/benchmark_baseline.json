@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "workload": {
+    "fixtures": [
+      "ordinary_source",
+      "ordinary_cropped",
+      "boundary_source",
+      "boundary_cropped",
+      "largest_source",
+      "largest_cropped"
+    ],
+    "algorithms": [
+      "ClassicDefault",
+      "ClassicHighSensitivity",
+      "ClassicSolidFill",
+      "ClassicLowSensitivity"
+    ],
+    "cache_state": "warm-cache (повторные проходы; page cache прогрет)"
+  },
+  "modes": {
+    "sequential": {
+      "workers": 1,
+      "tasks": 24,
+      "duration_seconds": 4.7170005360003415,
+      "process_cpu_seconds": 12.618649899999998,
+      "cpu_core_equivalents": 2.675048759649134,
+      "peak_rss_bytes": 418357248,
+      "tasks_per_second": 5.0879790699261145
+    },
+    "current_workers": {
+      "workers": 6,
+      "tasks": 24,
+      "duration_seconds": 1.6070088220003527,
+      "process_cpu_seconds": 13.414229102,
+      "cpu_core_equivalents": 8.34666236915691,
+      "peak_rss_bytes": 648110080,
+      "tasks_per_second": 14.9345788718979
+    }
+  },
+  "heartbeat": {
+    "status": "measured",
+    "period_ms": 50,
+    "samples": 93,
+    "p95_ms": 52.223691000108374,
+    "max_ms": 66.86782499855326
+  },
+  "io_conditions": {
+    "measured": "warm-cache: логическое чтение/декодирование повторных входов",
+    "unmeasured": "cold-storage I/O: задержки холодного диска НЕ измерялись",
+    "physical_io_counters": "см. telemetry.io_condition (могут быть 0 из-за page cache)",
+    "note": "Ноль физических read-bytes не означает отсутствие логических чтений и не доказывает отсутствие I/O-задержек."
+  }
+}
