@@ -91,7 +91,16 @@ def run_training(
 ) -> tuple[dict, list, list, Path]:
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
-    device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
+    cuda_available = torch.cuda.is_available()
+    if cfg.require_cuda and not cuda_available:
+        raise RuntimeError(
+            "This experiment requires a CUDA GPU; CPU fallback is disabled."
+        )
+    device = torch.device(cfg.device if cuda_available else "cpu")
+    if cfg.require_cuda and device.type != "cuda":
+        raise RuntimeError(
+            "This experiment requires training_device=cuda; CPU fallback is disabled."
+        )
     log.info("Device: %s", device)
 
     train_ds, val_ds = make_datasets(
@@ -431,6 +440,7 @@ def run_training(
             "epochs_requested": cfg.epochs,
             "augment": cfg.augment,
             "device_requested": cfg.device,
+            "cuda_required": cfg.require_cuda,
         },
         "patches_per_image": cfg.patches_per_image if patch_training else None,
         "seconds_per_epoch": [row["seconds"] for row in train_hist],

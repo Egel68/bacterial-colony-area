@@ -50,6 +50,50 @@ def compute_binary_metrics(
     }
 
 
+def binary_confusion_counts(
+    prediction: np.ndarray, target: np.ndarray
+) -> dict[str, int]:
+    """Сосчитать пиксельные TP/FP/FN/TN для бинарных масок."""
+    predicted = np.asarray(prediction) > 0
+    expected = np.asarray(target) > 0
+    if predicted.shape != expected.shape:
+        raise ValueError(
+            f"Prediction/target shape mismatch: {predicted.shape} != {expected.shape}"
+        )
+    return {
+        "tp": int(np.count_nonzero(predicted & expected)),
+        "fp": int(np.count_nonzero(predicted & ~expected)),
+        "fn": int(np.count_nonzero(~predicted & expected)),
+        "tn": int(np.count_nonzero(~predicted & ~expected)),
+    }
+
+
+def summarize_confusion_counts(counts: dict[str, int]) -> dict[str, object]:
+    """Сформировать точные метрики и матрицу [[TN, FP], [FN, TP]]."""
+    tp, fp, fn, tn = (int(counts[key]) for key in ("tp", "fp", "fn", "tn"))
+    if min(tp, fp, fn, tn) < 0:
+        raise ValueError("Confusion counts must be non-negative")
+
+    def ratio(numerator: int, denominator: int) -> float:
+        return numerator / denominator if denominator else 0.0
+
+    precision = ratio(tp, tp + fp)
+    recall = ratio(tp, tp + fn)
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "confusion_matrix": [[tn, fp], [fn, tp]],
+        "precision": precision,
+        "recall": recall,
+        "f1": ratio(2 * tp, 2 * tp + fp + fn),
+        "iou": ratio(tp, tp + fp + fn),
+        "dice": ratio(2 * tp, 2 * tp + fp + fn),
+        "accuracy": ratio(tp + tn, tp + tn + fp + fn),
+    }
+
+
 def _tile_positions(length: int, tile_size: int, stride: int) -> list[int]:
     if length <= tile_size:
         return [0]

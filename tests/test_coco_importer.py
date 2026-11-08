@@ -222,3 +222,121 @@ def test_split_import_rejects_output_nested_under_read_only_source(tmp_path):
         CocoBboxImporter().build(data_root=src, output_dir=out, split=True)
 
     assert not out.exists()
+
+
+def test_black_background_pairs_preserve_split_geometry_and_source(
+    tmp_path, monkeypatch
+):
+    import train.dataset_adapters as adapters
+
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    dish = {"cx": 60, "cy": 50, "r": 32}
+    monkeypatch.setattr(adapters, "_find_dish", lambda _image: dish)
+
+    source_hashes = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in src.iterdir()
+        if path.is_file()
+    }
+    original_writer = CocoBboxImporter._write_black_background
+
+    def assert_split_was_persisted(out, sample_id, image):
+        split_path = out / "split.json"
+        assert split_path.is_file()
+        split_data = json.loads(split_path.read_text(encoding="utf-8"))
+        assert split_data["seed"] == 42
+        assert (
+            len([group for groups in split_data["groups"].values() for group in groups])
+            == 3
+        )
+        return original_writer(out, sample_id, image)
+
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "_write_black_background",
+        staticmethod(assert_split_was_persisted),
+    )
+
+    out_a, out_b = tmp_path / "black-a", tmp_path / "black-b"
+    manifest_a = CocoBboxImporter().build(
+        data_root=src, output_dir=out_a, split=True, seed=42, black_background=True
+    )
+    manifest_b = CocoBboxImporter().build(
+        data_root=src, output_dir=out_b, split=True, seed=42, black_background=True
+    )
+
+    sources = {
+        record.id: record for record in manifest_a.samples if record.kind == "source"
+    }
+    variants = [record for record in manifest_a.samples if record.kind == "augmented"]
+    assert len(sources) == len(variants) == 3
+    assert {record.kind for record in manifest_a.samples} == {"source", "augmented"}
+    for variant in variants:
+        source = sources[variant.source_id]
+        assert source.subset == variant.subset
+        assert source.dish == variant.dish
+        assert source.mask == variant.mask
+        assert variant.id == f"{source.id}__black_background"
+
+        source_image = cv2.imread(str(out_a / source.image), cv2.IMREAD_COLOR)
+        black_image = cv2.imread(str(out_a / variant.image), cv2.IMREAD_COLOR)
+        assert source_image.shape == black_image.shape
+        yy, xx = np.ogrid[: source_image.shape[0], : source_image.shape[1]]
+        inside = (xx - dish["cx"]) ** 2 + (yy - dish["cy"]) ** 2 <= dish["r"] ** 2
+        assert np.array_equal(source_image[inside], black_image[inside])
+        assert np.all(black_image[~inside] == 0)
+        assert np.array_equal(
+            cv2.imread(str(out_a / source.mask), cv2.IMREAD_GRAYSCALE),
+            cv2.imread(str(out_a / variant.mask), cv2.IMREAD_GRAYSCALE),
+        )
+
+    split = json.loads((out_a / "split.json").read_text(encoding="utf-8"))
+    split_by_id = {
+        group["sample_id"]: subset
+        for subset, groups in split["groups"].items()
+        for group in groups
+    }
+    assert {
+        sample_id: record.subset for sample_id, record in sources.items()
+    } == split_by_id
+    assert {
+        (record.id, record.source_id, record.subset)
+        for record in manifest_a.samples
+        if record.kind == "augmented"
+    } == {
+        (record.id, record.source_id, record.subset)
+        for record in manifest_b.samples
+        if record.kind == "augmented"
+    }
+    roundtrip = load_manifest(out_a)
+    assert {
+        record.id: record.source_id
+        for record in roundtrip.samples
+        if record.kind == "augmented"
+    } == {record.id: record.source_id for record in variants}
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in src.iterdir()
+        if path.is_file()
+    } == source_hashes
+
+
+def test_black_background_requires_split_and_valid_dish_geometry(tmp_path, monkeypatch):
+    import pytest
+    import train.dataset_adapters as adapters
+
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    importer = CocoBboxImporter()
+    with pytest.raises(ValueError, match="require a persisted"):
+        importer.build(
+            data_root=src, output_dir=tmp_path / "no-split", black_background=True
+        )
+
+    monkeypatch.setattr(adapters, "_find_dish", lambda _image: None)
+    out = tmp_path / "missing-dish"
+    with pytest.raises(ValueError, match="sp01_img01"):
+        importer.build(data_root=src, output_dir=out, split=True, black_background=True)
+    assert not (out / "dataset.json").exists()
+    assert not (out / "augmented").exists()

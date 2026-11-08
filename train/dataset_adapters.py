@@ -77,6 +77,7 @@ class ManifestAdapter(BaseAdapter):
                     mask=Path(entry["mask"]),
                     subset=entry.get("subset"),
                     dish=dish,
+                    source_id=entry.get("source_id"),
                 )
             )
 
@@ -198,7 +199,13 @@ def _find_dish(image: np.ndarray) -> Optional[dict]:
     if petri is None:
         return None
     h, w = image.shape[:2]
-    if petri.cx < 0 or petri.cy < 0 or petri.radius <= 0:
+    if (
+        petri.cx < 0
+        or petri.cy < 0
+        or petri.cx >= w
+        or petri.cy >= h
+        or petri.radius <= 0
+    ):
         return None
     return {"cx": int(petri.cx), "cy": int(petri.cy), "r": int(petri.radius)}
 
@@ -209,7 +216,8 @@ class CocoBboxImporter(BaseAdapter):
     Источником служит папка вида `datasets/22022540/` с `annot_COCO.json` и
     снимками чашек Петри. Импортёр:
     - растризует боксы колоний во вписанные эллипсы бинарной маской (255=колония);
-    - опционально формирует `kind=cropped` — обрезку по кругу чашки с чёрным фоном;
+    - опционально сохраняет геометрию чашки и создаёт чёрнофоновую пару;
+    - опционально формирует `kind=cropped` — обрезку по кругу чашки;
     - материализует самодостаточную папку датасета (`storage="copy"`) с `dataset.json`,
       читаемую существующим `ManifestAdapter` без изменения ядра обучения.
 
@@ -224,6 +232,7 @@ class CocoBboxImporter(BaseAdapter):
         split: bool = False,
         seed: int = 42,
         split_ratios: tuple[float, float, float] = DEFAULT_SPLIT_RATIOS,
+        black_background: bool = False,
     ) -> DatasetManifest:
         """Запуск импорта по корню источника в `output_dir`.
 
@@ -231,6 +240,12 @@ class CocoBboxImporter(BaseAdapter):
         `<root>_imported`. Возвращается манифест выходного датасета.
         """
         import json
+
+        if black_background and not split:
+            raise ValueError(
+                "Black-background variants require a persisted source-level split; "
+                "pass split=True"
+            )
 
         source = Path(data_root)
         if not source.is_dir():
@@ -284,6 +299,7 @@ class CocoBboxImporter(BaseAdapter):
             assignments = {}
 
         samples: list[SampleRecord] = []
+        source_records: list[SampleRecord] = []
         processed = 0
         for image_id, image_meta in images_by_id.items():
             boxes = boxes_by_image.get(image_id)
@@ -310,26 +326,28 @@ class CocoBboxImporter(BaseAdapter):
             for _, bbox in boxes:
                 mask |= _rasterize_ellipse(bbox, image.shape)
 
-            # Геометрия чашки нужна для cropped-варианта и как метаданное source.
-            # Для source-only-импорта (обучение) авто-поиск пропускается — это
-            # заметно ускоряет импорт без потери обучающих масок.
-            dish = _find_dish(image) if crop else None
+            # Геометрия нужна для cropped-данных или чёрнофонового варианта.
+            # Source-only-импорт без этих опций по-прежнему пропускает авто-поиск.
+            dish = _find_dish(image) if crop or black_background else None
+            sample_id = Path(filename).stem
+            if black_background:
+                dish = self._require_dish_geometry(dish, image.shape, sample_id)
 
             rel_img, rel_mask = self._write_source(out, filename, image, mask)
-            samples.append(
-                SampleRecord(
-                    id=Path(filename).stem,
-                    kind=SampleKind.SOURCE.value,
-                    image=rel_img,
-                    mask=rel_mask,
-                    subset=(assignments.get(str(image_id)) if split else None),
-                    dish=(
-                        DishGeometry(cx=dish["cx"], cy=dish["cy"], r=dish["r"])
-                        if dish
-                        else None
-                    ),
-                )
+            source_record = SampleRecord(
+                id=sample_id,
+                kind=SampleKind.SOURCE.value,
+                image=rel_img,
+                mask=rel_mask,
+                subset=(assignments.get(str(image_id)) if split else None),
+                dish=(
+                    DishGeometry(cx=dish["cx"], cy=dish["cy"], r=dish["r"])
+                    if dish
+                    else None
+                ),
             )
+            samples.append(source_record)
+            source_records.append(source_record)
 
             if crop and dish is not None:
                 rel_img_c, rel_mask_c = self._write_cropped(
@@ -354,14 +372,6 @@ class CocoBboxImporter(BaseAdapter):
                 f"{processed}; refusing to write an incomplete split dataset"
             )
 
-        manifest = DatasetManifest(
-            name=out.name,
-            origin=Origin.EXTERNAL.value,
-            mask_mode="binary",
-            storage=StorageMode.COPY.value,
-            samples=samples,
-        )
-        self._write_dataset_json(out, manifest)
         if split:
             self._write_split_json(
                 out,
@@ -371,6 +381,48 @@ class CocoBboxImporter(BaseAdapter):
                 images_by_id=images_by_id,
                 boxes_by_image=boxes_by_image,
             )
+
+        if black_background:
+            for source_record in source_records:
+                if source_record.dish is None:
+                    raise ValueError(
+                        f"Missing dish geometry for source sample '{source_record.id}'"
+                    )
+                source_image_path = out / source_record.image
+                source_image = cv2.imread(str(source_image_path), cv2.IMREAD_COLOR)
+                if source_image is None:
+                    raise ValueError(
+                        f"Could not read prepared source image for '{source_record.id}'"
+                    )
+                dish = {
+                    "cx": source_record.dish.cx,
+                    "cy": source_record.dish.cy,
+                    "r": source_record.dish.r,
+                }
+                black_image = self._blacken_outside_dish(source_image, dish)
+                augmented_image = self._write_black_background(
+                    out, source_record.id, black_image
+                )
+                samples.append(
+                    SampleRecord(
+                        id=f"{source_record.id}__black_background",
+                        kind=SampleKind.AUGMENTED.value,
+                        image=augmented_image,
+                        mask=source_record.mask,
+                        subset=source_record.subset,
+                        dish=source_record.dish,
+                        source_id=source_record.id,
+                    )
+                )
+
+        manifest = DatasetManifest(
+            name=out.name,
+            origin=Origin.EXTERNAL.value,
+            mask_mode="binary",
+            storage=StorageMode.COPY.value,
+            samples=samples,
+        )
+        self._write_dataset_json(out, manifest)
         return manifest
 
     def _write_split_json(
@@ -418,6 +470,47 @@ class CocoBboxImporter(BaseAdapter):
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _require_dish_geometry(
+        dish: Optional[dict], shape: tuple[int, ...], sample_id: str
+    ) -> dict[str, int]:
+        if not isinstance(dish, dict):
+            raise ValueError(
+                f"Missing or invalid Petri-dish geometry for sample '{sample_id}'"
+            )
+        try:
+            cx, cy, radius = (int(dish[key]) for key in ("cx", "cy", "r"))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"Missing or invalid Petri-dish geometry for sample '{sample_id}'"
+            ) from error
+        height, width = shape[:2]
+        if cx < 0 or cy < 0 or cx >= width or cy >= height or radius <= 0:
+            raise ValueError(
+                f"Missing or invalid Petri-dish geometry for sample '{sample_id}'"
+            )
+        return {"cx": cx, "cy": cy, "r": radius}
+
+    @staticmethod
+    def _blacken_outside_dish(image: np.ndarray, dish: dict[str, int]) -> np.ndarray:
+        height, width = image.shape[:2]
+        yy, xx = np.ogrid[:height, :width]
+        inside = (xx - dish["cx"]) ** 2 + (yy - dish["cy"]) ** 2 <= dish["r"] ** 2
+        black_image = image.copy()
+        black_image[~inside] = 0
+        return black_image
+
+    @staticmethod
+    def _write_black_background(out: Path, sample_id: str, image: np.ndarray) -> Path:
+        directory = out / SampleKind.AUGMENTED.value
+        directory.mkdir(parents=True, exist_ok=True)
+        rel_image = (
+            Path(SampleKind.AUGMENTED.value) / f"{sample_id}_black_background.png"
+        )
+        if not cv2.imwrite(str(out / rel_image), image):
+            raise OSError(f"Could not write black-background variant for '{sample_id}'")
+        return rel_image
 
     def _write_source(
         self,
@@ -496,6 +589,8 @@ class CocoBboxImporter(BaseAdapter):
                     "cy": sample.dish.cy,
                     "r": sample.dish.r,
                 }
+            if sample.source_id is not None:
+                entry["source_id"] = sample.source_id
             payload["samples"].append(entry)
 
         (out / "dataset.json").write_text(

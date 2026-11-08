@@ -8,34 +8,28 @@
 
 ## 0. Общая схема
 
-```
 datasets/22022540/                 ── ИСХОДНИК · только чтение
 ├── spXX_imgYY.jpg       (369 фото)
 ├── annot_COCO.json      (56 865 боксов, COCO)
-├── annot_tab.tsv|csv    (дубль формата)
-├── annot_YOLO.zip       (369 .txt, дубль)
-└── annot_VOC_XML.zip    (369 .xml, дубль)
+└── другие дубли форматов
         │
-        ▼   train/importer_cli.py  →  CocoBboxImporter.build()
-ИМПОРТ (растризация боксов→маски, materialize)
-        │
+        ▼  CocoBboxImporter + source-level split до генерации вариантов
+ПОДГОТОВКА  369 originals + 369 black-background variants
+        │  парные записи наследуют один subset; masks/geometry общие
         ▼
-<output>/                        ── САМОДОСТАТОЧНЫЙ датасет (~607 МБ)
-├── dataset.json            (манифест: name/origin/mask_mode/storage/samples)
-├── source/spXX_imgYY.jpg   (копия фото)
-└── source/spXX_imgYY_mask.png  (бинарная маска 255=колония)
+<output>/                        ── подготовленный dataset.json
         │
-        ▼   load_manifest() → ManifestAdapter
-        │   name            ── контракт данных (ядро не знает про COCO/папки)
-        ▼   make_datasets() → ColonyDataset
-ОБУЧЕНИЕ  train.main train → summary.json + report.html
+        ▼  train-colony: baseline → scratch U-Net на CUDA
+ОБУЧЕНИЕ  patches 512×512; выбор checkpoint по validation
         │
-        ▼   best.pt → export_single.py
-ЭКСПОРТ  models/colony_seg.onnx
+        ▼  best.onnx + paired test report
+ОЦЕНКА  те же held-out IDs на original и black backgrounds
         │
-        ▼   register_bundled_models()
-ИНТЕГРАЦИЯ OnnxModelAlgorithm.detect(image) → uint8 mask (NN:colony_seg)
-```
+        ▼  только отдельное явное решение о promotion
+models/colony_seg.onnx
+        │
+        ▼  register_bundled_models()
+ИНТЕГРАЦИЯ TiledOnnxModelAlgorithm: CPU tiles 512×512, stride 384 → uint8 mask
 
 Ключевой принцип: **ядро обучения не знает, откуда данные**. Оно потребляет
 только манифест. Весь формат «COCO-боксы → маски» спрятан в одном импортёре.
@@ -65,12 +59,15 @@ CLI-вход — `train/importer_cli.py`, скрипт `import-22022540`
 ```bash
 uv run import-22022540 \
   --data-root datasets/22022540 \   # обязательный, источник (read-only)
-  --output /tmp/ds_22022540         # куда писать результат
+  --output /tmp/ds_22022540 \
+  --split --seed 42 \
+  --black-background \
   [--crop]                          # доп. обрезки по чашке (kind=cropped)
   [--verify]                        # сверка COCO vs YOLO/VOC
 ```
 
-Вызывается `CocoBboxImporter.build(data_root, output_dir, crop)`.
+Вызывается `CocoBboxImporter.build(data_root, output_dir, crop, split, seed,
+black_background)`. Чёрнофоновые варианты требуют `split=True`.
 
 ### 2.1 Чтение COCO и группировка боксов
 
@@ -121,18 +118,25 @@ return {"cx": petri.cx, "cy": petri.cy, "r": petri.radius}
 
 - Переиспользуется существующий авто-поиск чашки (блики → контур →
   `minEnclosingCircle`, при неудаче HoughCircles).
-- **Нюанс реализации:** чашка ищется **только при `--crop`**. Для source-only-импорта
-  (нужен только для обучения по полным чашкам) поиск пропускается ради скорости —
-  геометрия в `dish` тогда `None`. Это осознанное упрощение (см. design, D4/D5).
+- Чашка ищется при `--crop` или `--black-background`. Для обычного source-only-импорта
+  поиск по-прежнему пропускается ради скорости, и `dish` остаётся `None`.
+- В режиме `--black-background` невалидная/отсутствующая геометрия приводит к ошибке
+  с ID source sample; запись не пропускается молча.
 
 ### 2.5 Материализация файлов
 
 ```bash
 <output>/
-├── source/sp01_img01.jpg        # копия исходника
-├── source/sp01_img01_mask.png   # бинарная маска (255=колония)
-└── ...                          # ×369
+├── source/sp01_img01.jpg        # исходник
+├── source/sp01_img01_mask.png   # бинарная GT-маска (255=колония)
+├── augmented/                   # только при --black-background
+│   └── sp01_img01_black_background.png
+└── ...
 ```
+
+Чёрный вариант имеет исходный размер: пиксели внутри круга чашки остаются
+неизменными, всё за пределами круга становится нулевым (чёрным). Для записи
+варианта используется без потерь PNG, а GT-маска разделяется с оригиналом.
 
 При `--crop` дополнительно:
 
@@ -159,14 +163,23 @@ cropped/XXX_cropped_mask.png
       "kind": "source",
       "image": "source/sp01_img01.jpg",
       "mask": "source/sp01_img01_mask.png",
+      "subset": "train",
       "dish": {"cx": 1841, "cy": 1479, "r": 1879}
+    },
+    {
+      "id": "sp01_img01__black_background",
+      "kind": "augmented",
+      "image": "augmented/sp01_img01_black_background.png",
+      "mask": "source/sp01_img01_mask.png",
+      "subset": "train",
+      "source_id": "sp01_img01"
     }
   ]
 }
 ```
 
-Поля: `kind` (`source|cropped`), пути **относительные** от корня,
-опциональные `subset` и `dish`.
+Поля: `kind` (`source|cropped|augmented`), пути **относительные** от корня,
+опциональные `subset`, `dish` и `source_id` (для ссылки варианта на исходник).
 
 ### 2.7 Верификация (`--verify`, `_verify_counts`)
 
@@ -184,6 +197,23 @@ if abs(coco_cnt - ref_cnt) > 5:
 
 В этом датасете все три формата согласованы → 0 расхождений, что подтверждает
 корректность масок.
+
+### 2.8 Парная подготовка чёрнофоновых вариантов
+
+```bash
+uv run import-22022540 \
+  --data-root datasets/22022540 \
+  --output /tmp/ds_22022540_black \
+  --split --seed 42 --black-background --verify
+```
+
+Импорт сначала назначает source ID стратифицированным группам train/val/test по
+категории COCO и записывает этот source-level split в `split.json`. Только затем
+создаются `kind=augmented` записи: каждому `source` соответствует один
+полноразмерный вариант с тем же `subset`, той же GT-маской и стабильным
+`source_id`. Поэтому оригинал и его чёрный вариант не могут попасть в разные
+выборки. Подготовка пишет только в отдельный `--output`; каталог источника
+остаётся read-only.
 
 ---
 
@@ -295,47 +325,57 @@ opset 18. Один файл без внешних данных.
 `models/colony_seg.onnx` сканируется при старте:
 
 ```python
-# testing/onnx_algorithm.py
-for model_file in models_dir.glob("*.onnx"):
-    algos.append(OnnxModelAlgorithm(model_file, name=f"NN:{model_file.stem}", ...))
+# testing/onnx_algorithm.py — production model special case
+if model_file.stem == "colony_seg":
+    algos.append(TiledOnnxModelAlgorithm(
+        model_path=str(model_file), name="NN:colony_seg",
+        img_size=512, stride=384, threshold=0.5, output_is_logits=True,
+    ))
+else:
+    algos.append(OnnxModelAlgorithm(
+        model_path=str(model_file), name=f"NN:{model_file.stem}", ...
+    ))
 ```
 
 → в реестре появляется алгоритм **`NN:colony_seg`**, как у классических.
 
-### 6.2 Инференс (`OnnxModelAlgorithm.detect`)
+### 6.2 Инференс (`TiledOnnxModelAlgorithm.detect`)
 
 ```python
-rgb = cvtColor(image, BGR2RGB)
-resized = resize(rgb, (512,512))              # img_size по умолчанию 512
-tensor = (resized/255 - MEAN)/STD             # та же нормализация, что в обучении
-raw = session.run(None, {input}: tensor)[0][0,0]   # [1,1,512,512] → [512,512]
-raw = resize(raw, (w,h), INTER_LINEAR)        # назад к размеру входного фото
-binary = (raw > 0.5).astype(uint8)*255        # порог 0.5 → 0/255
+for tile in tiles(image, size=512, stride=384):
+    tensor = normalize_rgb(tile)              # ImageNet mean/std, [1,3,512,512]
+    logits = session.run(None, {input: tensor})[0][0,0]
+    probabilities = sigmoid(logits)
+    accumulate(probability_sum, probability_count, probabilities, tile.position)
+mask = (probability_sum / probability_count >= 0.5).astype(uint8) * 255
 ```
 
-Именно **совпадение препроцессинга (ресайз в 512, ImageNet-нормализация,
-BGR→RGB) между обучением и инференсом** делает модель совместимой с текущим
-решением без нового кода. Выход — бинарная маска 255/0, та же, что у
-классических алгоритмов.
+Полноразмерный кадр не сжимается целиком: каждый 512×512 тайл нормализуется так
+же, как обучающие патчи; соседние тайлы перекрываются на 128 px. Логиты
+преобразуются сигмоидой в вероятности, усредняются в областях перекрытия, затем
+порог 0.5 формирует маску исходного размера. Инференс в приложении выполняется
+на CPU через ONNX Runtime.
 
 ---
 
 ## 7. End-to-End (одна строка на шаг)
 
-```bash
-# 1) импорт
-uv run import-22022540 --data-root datasets/22022540 --output /tmp/ds_22022540 --verify
-# 2) обучение
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train \
-  --model unet --data-root /tmp/ds_22022540 --img-size 512 --epochs 200
-# 3) single-file ONNX в models/
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
-  --checkpoint train/runs/unet_<ts>/checkpoints/best.pt \
-  --output models/colony_seg.onnx --img-size 512
-# 4) проверка как алгоритм
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -c \
-  "from testing.onnx_algorithm import OnnxModelAlgorithm as A; \
-   import cv2; print(A('models/colony_seg.onnx').detect(cv2.imread('datasets/22022540/sp01_img01.jpg')).shape)"
+# Полный paired-run: подготовка датасета завершается до baseline и обучения (CUDA обязательна)
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
+  --data-root datasets/22022540 --output <new-output-dir> \
+  --model unet --black-background --no-pretrained --seed 42 \
+  --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 2 --patches-per-image 4 --img-size 512
+# Проверьте comparison.json/report.json до ручного promotion best.onnx.
+cp <new-output-dir>/runs/unet_<ts>/checkpoints/best.onnx models/colony_seg.onnx
+# Smoke-check production registration (CPU tiled inference).
+UV_PROJECT_ENVIRONMENT=.venv uv run --no-sync python - <<'PY'
+import cv2
+from testing.onnx_algorithm import scan_bundled_models
+algorithm = next(a for a in scan_bundled_models("models") if a.name == "NN:colony_seg")
+image = cv2.imread("datasets/22022540/sp01_img01.jpg")
+print(algorithm.detect(image).shape)
+PY
 ```
 
 ---
@@ -346,10 +386,12 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run python -c \
    `_rasterize_ellipse`.
 2. **Разные форматы сводятся к единому контракту** через `dataset.json` +
    `ManifestAdapter` — ядро обучения не менялось.
-3. **Ресайз полных чашек 2800–5600 px → `img_size` + ImageNet-нормализация**
-   согласованы между `ColonyDataset` и `OnnxModelAlgorithm.detect`.
+3. **Обучение и production-инференс используют один масштаб:** обучение берёт
+   патчи 512×512, приложение покрывает исходный кадр тайлами 512×512 с
+   шагом 384; целое изображение не сжимается.
 4. **Модель решает только «есть колония»** (binary mask, BCE+Dice, порог 0.5),
-   а не классификацию вида — поэтому подключается штатным `OnnxModelAlgorithm`.
+   а не классификацию вида — production регистрирует её через
+   `TiledOnnxModelAlgorithm` и исполняет на CPU.
 
 ---
 
@@ -363,5 +405,5 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run python -c \
 | `train/dataset_manifest.py` | Контракт `DatasetManifest` / `SampleRecord` / `DishGeometry` |
 | `train/dataset.py` | `make_datasets`, `ColonyDataset`, seed-сплит |
 | `train/main.py` | CLI обучения, `--data-root` |
-| `testing/onnx_algorithm.py` | `OnnxModelAlgorithm`, `register_bundled_models` |
+| `testing/onnx_algorithm.py` | `OnnxModelAlgorithm`, special tiled registration, `register_bundled_models` |
 | `models/colony_seg.onnx` | Готовая модель (bundled, `NN:colony_seg`) |

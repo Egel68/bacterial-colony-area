@@ -152,6 +152,16 @@ def _train_colony(args, parser):
         parser.error(
             "Native-resolution patch training currently requires --img-size 512"
         )
+    if args.black_background and args.model != "unet":
+        parser.error("--black-background requires --model unet")
+    if args.reuse_prepared_dataset and not args.black_background:
+        parser.error("--reuse-prepared-dataset requires --black-background")
+    if args.reuse_prepared_dataset and args.resume_run:
+        parser.error("--reuse-prepared-dataset is incompatible with --resume-run")
+    if args.black_background and args.resume_run:
+        parser.error(
+            "--black-background requires a fresh run; --resume-run is incompatible"
+        )
 
     from .training_pipeline import run_colony_training
 
@@ -165,10 +175,13 @@ def _train_colony(args, parser):
         patches_per_image=args.patches_per_image,
         img_size=args.img_size,
         pretrained=not args.no_pretrained,
+        model_name=args.model,
+        black_background=args.black_background,
         model_promotion_path=(Path(args.promote_model) if args.promote_model else None),
         allow_overwrite=args.allow_overwrite,
         cpu_benchmark=args.cpu_benchmark,
         resume_run=Path(args.resume_run) if args.resume_run else None,
+        reuse_prepared_dataset=args.reuse_prepared_dataset,
     )
 
 
@@ -224,7 +237,23 @@ def main(argv: Sequence[str] | None = None):
         "--data-root", required=True, help="COCO source directory"
     )
     colony_parser.add_argument(
+        "--model",
+        choices=("mobilenet_v3_small_unet", "unet"),
+        default="mobilenet_v3_small_unet",
+        help="Architecture (default: mobilenet_v3_small_unet)",
+    )
+    colony_parser.add_argument(
+        "--black-background",
+        action="store_true",
+        help="Run the paired black-background experiment (requires --model unet)",
+    )
+    colony_parser.add_argument(
         "--output", required=True, help="Output root for dataset and run"
+    )
+    colony_parser.add_argument(
+        "--reuse-prepared-dataset",
+        action="store_true",
+        help="Validate and continue from an existing complete dataset/ directory",
     )
     colony_parser.add_argument("--seed", type=int, default=42)
     colony_parser.add_argument("--train-ratio", type=float, default=0.70)
