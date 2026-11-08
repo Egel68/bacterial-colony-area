@@ -62,6 +62,8 @@ opencode.json
 !docs/datasets.md
 !docs/architecture.md
 !docs/algorithms.md
+!docs/colony-segmentation-background-evaluation.md
+!docs/colony-segmentation-background-comparison.json
 
 # Evaluation reports (track JSON, ignore regeneratable HTML)
 evaluations/*/report.html

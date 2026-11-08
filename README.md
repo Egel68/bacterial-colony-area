@@ -420,7 +420,7 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
 | `--resume-run DIR` | — | Продолжить run из `<output>/runs/`; weight-only checkpoint даёт warm-start |
 | `--cpu-benchmark` | выключен | Замерить tiled ONNX-инференс через CPU provider на test-снимках |
 | `--promote-model FILE.onnx` | — | Скопировать полученный ONNX по указанному пути |
-| `--allow-overwrite` | выключен | Разрешить перезапись promoted-модели (legacy `models/colony_seg.onnx` защищён) |
+| `--allow-overwrite` | выключен | Разрешить перезапись promoted-модели; production `models/colony_seg.onnx` защищён |
 
 > `--output` для нового запуска должен быть новым или пустым каталогом, отдельным от
 > COCO-источника. Без `--cpu-benchmark` test-метрики считаются PyTorch-моделью на
@@ -428,6 +428,21 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
 > но inference в приложении всегда CPU-only.
 >
 > Эквивалентная запись: `python -m train.main train-colony ...`
+
+#### Парный scratch-U-Net эксперимент с чёрным фоном
+
+Для `22022540` сначала полностью строятся source/black пары и source-level split; baseline ONNX оценивается на original и black test-вариантах до обучения. Затем `unet` обучается с нуля **только на CUDA GPU** (при недоступной CUDA запуск завершается ошибкой, CPU fallback запрещён), после чего обе версии модели оцениваются на тех же test ID и фонах.
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
+  --data-root ./datasets/22022540 \
+  --output ./train/runs/22022540_black_background_seed42 \
+  --model unet --black-background --reuse-prepared-dataset --no-pretrained \
+  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 2 --patches-per-image 4 --img-size 512
+```
+
+`--reuse-prepared-dataset` допустим только при наличии полностью готового `<output>/dataset/`; перед оценкой pipeline повторно проверяет split, source coverage, все пары, общую маску и файлы. Для нового output-каталога уберите этот флаг: сначала импортируются все пары, затем считается baseline, и только после этого начинается GPU-обучение. Baseline tiled ONNX-инференс остаётся CPU-only; это не влияет на GPU-only optimizer updates. В `comparison.json` / `comparison.html` записываются precision, recall, `[[TN, FP], [FN, TP]]` и результаты baseline/new для обоих фонов.
 
 ---
 
@@ -518,7 +533,7 @@ cp -r session/cropped_masks/* test_images/cropped_masks/
 | `ClassicHighSensitivity` | Классический | sensitivity 0.7, отступ 5%, мин. размер 30 px |
 | `ClassicLowSensitivity` | Классический | sensitivity 0.3, отступ 10%, мин. размер 100 px |
 | `ClassicSolidFill` | Классический | sensitivity 0.3, отступ 15%, solid fill |
-| `NN:colony_seg` | ONNX | U-Net, кадр приводится к 512×512, маска растягивается обратно |
+| `NN:colony_seg` | ONNX | U-Net, тайлы 512×512 со шагом 384 px, усреднение вероятностей перекрытий |
 | `NN:colony_mobilenet_v3_small` | ONNX | MobileNetV3-Small, тайлы 512×512 со шагом 384 px, усреднение перекрытий |
 
 Внутреннее расширение и валидация моделей:
@@ -660,8 +675,9 @@ bacterial-colony-area/
   порогом 0.5.
 - **COCO bbox → эллипс — приблизительная разметка** (weak labels), а не точный контур
   колонии.
-- **Масштабы inference разные:** только MobileNet работает в полном разрешении тайлами;
-  обычный ONNX-адаптер уменьшает кадр до размера модели и растягивает маску обратно.
+- **Масштабы inference разные:** встроенные `NN:colony_seg` и MobileNet работают
+  по перекрывающимся тайлам полного разрешения; универсальный ONNX-адаптер
+  уменьшает кадр до размера модели и растягивает маску обратно.
 - **Скорость NN-зависит от CPU и размера снимка.** Модель работает асинхронно в
   фоновом потоке, окно показывает прогресс тайлов.
 - **Кнопка «💾 Сохранить»** в окне анализа сохраняет отображаемый pixmap области

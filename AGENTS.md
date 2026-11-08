@@ -353,26 +353,30 @@ uv run import-22022540 --data-root datasets/22022540 --output <dir> [--crop] [--
   предупреждает при расхождении > 5 (в этом датасете форматы согласованы, 0 расхождений).
 - Источник читается только; выход пишется в `--output` (`storage="copy"`).
 
-**Готовая модель** — `models/colony_seg.onnx` (U-Net, обучен на импортированном
-датасете 22022540, бинарная сегментация). Автоматически регистрируется при старте
-как алгоритм `NN:colony_seg` через `register_bundled_models`; сигнатура
-`detect(image)->uint8 mask` (порог 0.5). Базовые метрики на валидации: IoU 0.72,
-Dice 0.83.
+**Текущая production-модель** — `models/colony_seg.onnx`: scratch U-Net, обученная
+с нуля на парных исходных/чёрнофоновых изображениях 22022540 (seed 42, source split
+70/15/15). Обучение выполнено на CUDA/NVIDIA GeForce RTX 2060 with Max-Q Design.
+`NN:colony_seg` регистрируется через `TiledOnnxModelAlgorithm`: CPU, тайлы
+512×512, stride 384, sigmoid для logits, усреднение вероятностей перекрытий,
+порог 0.5. На paired holdout из 54 source ID: исходный фон — IoU 0.4812, Dice
+0.6497, Precision 0.8340, Recall 0.5322; чёрный — IoU 0.4721, Dice 0.6414,
+Precision 0.8375, Recall 0.5197. Overlap test-ID с историческим baseline train
+неизвестен (`unknown`). Подробный report: `train/runs/22022540_black_background_seed42/runs/unet_20261107_171657_193829/comparison.json`.
 
-**Воспроизведение обучения:**
+**Воспроизведение обучения с нуля (CUDA обязательна, без CPU fallback):**
 ```bash
-# 1) Импорт датасета
-uv run import-22022540 --data-root datasets/22022540 --output /tmp/ds_22022540
-# 2) Обучение (в окружении .venv-full)
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train \
-  --model unet --data-root /tmp/ds_22022540 --img-size 512 --epochs 200
-# 3) best.onnx лежит в train/runs/unet_<ts>/checkpoints/best.onnx
-# 4) (опционально) компактный single-file ONNX без внешних данных:
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
-  --checkpoint train/runs/unet_<ts>/checkpoints/best.pt \
-  --output models/colony_seg.onnx --img-size 512
-# 5) Инференс как алгоритм: тест покрыт tests/test_coco_importer.py + OnnxModelAlgorithm
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
+  --data-root datasets/22022540 --output <new-output-dir> \
+  --model unet --black-background --no-pretrained --seed 42 \
+  --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 2 --patches-per-image 4 --img-size 512
 ```
+
+`train-colony` готовит и валидирует датасет до baseline-оценки и обучения;
+checkpoint и paired reports сохраняются в `<new-output-dir>/runs/unet_<ts>/`.
+Продвигать проверенный `best.onnx` в production следует только отдельным
+явным решением после изучения comparison report; training pipeline не должен
+перезаписывать `models/colony_seg.onnx` автоматически.
 
 ---
 
@@ -444,7 +448,7 @@ bash scripts/build_nuitka.sh
 | `testing/interface.py` | ABC для алгоритмов детекции |
 | `testing/registry.py` | Декоратор `@register_algorithm` + `register_algorithm_instance` |
 | `testing/classic_algorithms.py` | 4 варианта классического алгоритма |
-| `testing/onnx_algorithm.py` | ONNX-адаптер (`OnnxModelAlgorithm`), сканирование встроенных моделей `models/*.onnx` |
+| `testing/onnx_algorithm.py` | ONNX-адаптеры и выбор tiled/resize для bundled-моделей `models/*.onnx` |
 | `testing/dataset.py` | Загрузчик тестовых пар (изображение + GT-маска) |
 | `testing/metrics.py` | IoU, Dice, F1, Precision, Recall |
 | `testing/runner.py` | Прогон алгоритмов и сбор метрик |

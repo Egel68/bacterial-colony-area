@@ -105,11 +105,18 @@ def main():
         action="store_true",
         help="Persist a deterministic stratified train/val/test split",
     )
+    parser.add_argument(
+        "--black-background",
+        action="store_true",
+        help="Create one full-size black-background variant per source (requires --split)",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Split seed (default: 42)")
     parser.add_argument(
         "--verify", action="store_true", help="Cross-check COCO vs YOLO/VOC counts"
     )
     args = parser.parse_args()
+    if args.black_background and not args.split:
+        parser.error("--black-background requires --split")
 
     manifest = CocoBboxImporter().build(
         data_root=args.data_root,
@@ -117,6 +124,7 @@ def main():
         crop=args.crop,
         split=args.split,
         seed=args.seed,
+        black_background=args.black_background,
     )
 
     if args.verify:
@@ -124,13 +132,15 @@ def main():
 
     n_source = sum(1 for s in manifest.samples if s.kind == "source")
     n_cropped = sum(1 for s in manifest.samples if s.kind == "cropped")
+    n_augmented = sum(1 for s in manifest.samples if s.kind == "augmented")
     out = args.output or f"{args.data_root}_imported"
     log.info(
-        "Импорт завершён: изображений обработано=%d, записей source=%d, cropped=%d, "
+        "Импорт завершён: записей всего=%d, source=%d, cropped=%d, augmented=%d, "
         "dataset.json=%s",
         len(manifest.samples),
         n_source,
         n_cropped,
+        n_augmented,
         out + "/dataset.json",
     )
 

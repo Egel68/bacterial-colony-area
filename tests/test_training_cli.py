@@ -147,6 +147,208 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
     assert report["training_summary"]["best_epoch"] == 1
 
 
+def test_black_background_pipeline_configures_scratch_unet_and_train_only_pairs(
+    tmp_path, monkeypatch
+):
+    import train.dataset_adapters as adapters
+    import train.training_pipeline as pipeline
+    from train import models
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    source = tmp_path / "source"
+    source.mkdir()
+    coco_images, annotations = [], []
+    for index in range(6):
+        filename = f"dish-{index}.png"
+        image = np.full((64, 64, 3), (40 + index, 60, 80), dtype=np.uint8)
+        cv2.imwrite(str(source / filename), image)
+        coco_images.append(
+            {"id": index + 1, "file_name": filename, "width": 64, "height": 64}
+        )
+        annotations.append(
+            {
+                "id": index + 1,
+                "image_id": index + 1,
+                "bbox": [18, 18, 24, 24],
+                "category_id": 1 if index < 3 else 2,
+            }
+        )
+    (source / "annot_COCO.json").write_text(
+        json.dumps({"images": coco_images, "annotations": annotations}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        adapters, "_find_dish", lambda _image: {"cx": 32, "cy": 32, "r": 30}
+    )
+
+    observed = {}
+    events = []
+    original_fake_training = _fake_run_training
+
+    def capture_training_config(cfg, progress_callback=None):
+        observed["config"] = cfg
+        events.append("train")
+        return original_fake_training(cfg, progress_callback)
+
+    monkeypatch.setattr(pipeline, "run_training", capture_training_config)
+    patch_record_subsets = []
+
+    def evaluate_training_subset(_model, records, *_args, **_kwargs):
+        patch_record_subsets.append({record.subset for record in records})
+        return {
+            "mean": {"iou": 0.5, "dice": 0.66},
+            "per_image": {record.id: {"iou": 0.5} for record in records},
+            "n_images": len(records),
+        }
+
+    monkeypatch.setattr(pipeline, "evaluate_patch_records", evaluate_training_subset)
+    monkeypatch.setattr(
+        pipeline,
+        "verify_onnx_cpu_parity",
+        lambda *_args, **_kwargs: {"passed": True},
+    )
+    metric_row = {
+        "tp": 1,
+        "fp": 2,
+        "fn": 3,
+        "tn": 4,
+        "confusion_matrix": [[4, 2], [3, 1]],
+        "precision": 1 / 3,
+        "recall": 1 / 4,
+        "f1": 2 / 7,
+        "iou": 1 / 6,
+        "dice": 2 / 7,
+        "accuracy": 0.5,
+    }
+
+    def fake_paired_evaluation(model_path, records, data_root, **_kwargs):
+        del data_root
+        label = (
+            "baseline" if str(model_path).endswith("colony_seg.onnx") else "retrained"
+        )
+        events.append(label)
+        sources = {
+            record.id: record
+            for record in records
+            if record.kind == "source" and record.subset == "test"
+        }
+        variants = {
+            record.source_id: record
+            for record in records
+            if record.kind == "augmented" and record.subset == "test"
+        }
+        ids = sorted(sources)
+        backgrounds = {}
+        for background, selected in (("original", sources), ("black", variants)):
+            per_sample = {
+                source_id: {
+                    "source_id": source_id,
+                    "record_id": record.id,
+                    "image": str(record.image),
+                    "mask": str(record.mask),
+                    "width": 64,
+                    "height": 64,
+                    **metric_row,
+                }
+                for source_id, record in selected.items()
+            }
+            backgrounds[background] = {
+                "source_ids": ids,
+                "per_sample": per_sample,
+                "summary": metric_row,
+            }
+        return {
+            "path": str(model_path),
+            "sha256": label,
+            "source_ids": ids,
+            "backgrounds": backgrounds,
+        }
+
+    monkeypatch.setattr(pipeline, "evaluate_paired_model", fake_paired_evaluation)
+
+    class _FakeModel:
+        def load_state_dict(self, _state):
+            pass
+
+        def to(self, _device):
+            return self
+
+    monkeypatch.setattr(models, "get_model", lambda *_args, **_kwargs: _FakeModel())
+    monkeypatch.setattr(torch, "load", lambda *_args, **_kwargs: {})
+
+    main(
+        [
+            "train-colony",
+            "--data-root",
+            str(source),
+            "--output",
+            str(tmp_path / "output"),
+            "--model",
+            "unet",
+            "--black-background",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "1",
+            "--patches-per-image",
+            "1",
+        ]
+    )
+
+    cfg = observed["config"]
+    assert events == ["baseline", "train", "retrained"]
+    assert cfg.model_name == "unet"
+    assert cfg.pretrained is False
+    assert cfg.resume_checkpoint is None
+    assert cfg.require_cuda is True
+    assert patch_record_subsets == [{"train"}, {"val"}]
+    manifest = json.loads((tmp_path / "output/dataset/dataset.json").read_text())
+    assert len(manifest["samples"]) == 12
+    for variant in (
+        sample for sample in manifest["samples"] if sample["kind"] == "augmented"
+    ):
+        source_record = next(
+            sample
+            for sample in manifest["samples"]
+            if sample["id"] == variant["source_id"]
+        )
+        assert source_record["subset"] == variant["subset"]
+    report_path = next((tmp_path / "output").glob("runs/*/report.json"))
+    report = json.loads(report_path.read_text())
+    comparison_path = next((tmp_path / "output").glob("runs/*/comparison.json"))
+    comparison = json.loads(comparison_path.read_text())
+    assert report["source_signature"]["unchanged"] is True
+    assert comparison["baseline_training_overlap"] == "unknown"
+    assert comparison["test_source_ids"] == comparison["split_ids"]["test"]
+    assert comparison["seed"] == 42
+    assert comparison["ratios"] == {"train": 0.7, "val": 0.15, "test": 0.15}
+    assert comparison["threshold"] == 0.5
+    assert comparison["configuration"]["architecture"] == "unet"
+    assert comparison["configuration"]["initialization"] == "random"
+    assert comparison["source_provenance"]["unchanged"] is True
+    assert comparison["source_provenance"]["sha256"]
+    paired_report = report["paired_background_experiment"]
+    assert paired_report["test_source_ids"] == comparison["test_source_ids"]
+    for model_name in ("baseline", "retrained"):
+        for background in ("original", "black"):
+            condition = comparison["models"][model_name]["backgrounds"][background]
+            assert condition["source_ids"] == comparison["test_source_ids"]
+            assert set(condition["per_sample"]) == set(comparison["test_source_ids"])
+            assert (
+                paired_report["models"][model_name]["backgrounds"][background][
+                    "summary"
+                ]["confusion_matrix"]
+                == condition["summary"]["confusion_matrix"]
+            )
+    html_path = next((tmp_path / "output").glob("runs/*/comparison.html"))
+    page = html_path.read_text(encoding="utf-8")
+    assert all(source_id in page for source_id in comparison["test_source_ids"])
+    assert "[[4, 2], [3, 1]]" in page
+    assert report["comparison_json"] == str(comparison_path)
+    assert report["comparison_html"] == str(html_path)
+
+
 def test_model_promotion_refuses_to_overwrite_without_explicit_consent(
     tmp_path, monkeypatch
 ):

@@ -108,7 +108,7 @@ get_algorithm_descriptions() -> [(name, description), ...]
 | `ClassicSolidFill` | `…ClassicSolidFill` | класс | автоматически |
 | `ClassicLowSensitivity` | `…ClassicLowSensitivity` | класс | автоматически |
 | `NN:colony_mobilenet_v3_small` | `TiledOnnxModelAlgorithm` | **экземпляр** | `register_bundled_models()` из `models/*.onnx` |
-| `NN:colony_seg` | `OnnxModelAlgorithm` | **экземпляр** | то же |
+| `NN:colony_seg` | `TiledOnnxModelAlgorithm` | **экземпляр** | то же |
 | `NN:<stem>` | `OnnxModelAlgorithm` | экземпляр | то же, для любого `models/*.onnx` |
 
 Четыре классических алгоритма регистрируются как **классы** и всегда доступны.
@@ -257,7 +257,7 @@ binary   = (raw > threshold) * 255
 | Порог | **строгое** `>` |
 | Выход модели | Трактуется как вероятность, **сигмоида не применяется** |
 | Прогресс | Не поддерживается (`detect_with_progress` отсутствует) |
-| Применение | Модели, обученные на ресайзе целиком: `colony_seg.onnx` |
+| Применение | Произвольные ONNX-модели; bundled `colony_seg.onnx` отдельно использует тайловый адаптер |
 
 Плюс этого подхода — работает с любой геометрией, включая сильно вытянутые
 кадры, и очень быстрый (один проход). Минус — мелкие колонии теряются при
@@ -330,16 +330,17 @@ return (probability_sum >= threshold) * 255
 | `stem` файла в `models/` | Адаптер | Имя в реестре | Описание |
 |---|---|---|---|
 | `colony_mobilenet_v3_small` | `TiledOnnxModelAlgorithm` | `NN:colony_mobilenet_v3_small` | «MobileNetV3-Small: CPU-инференс на полном разрешении, с перекрывающимися тайлами» |
-| `colony_seg` | `OnnxModelAlgorithm` | `NN:colony_seg` | «Legacy ONNX-модель: …» |
+| `colony_seg` | `TiledOnnxModelAlgorithm` | `NN:colony_seg` | «U-Net: CPU-инференс на полном разрешении с перекрывающимися тайлами» |
 | любой другой | `OnnxModelAlgorithm` | `NN:<stem>` | «Встроенная нейросетевая модель …» |
 
 **Важно:** этот выбор действует только для файлов из папки `models/`.
 `--model` в CLI и кнопка «Загрузить модель» в GUI создают
-`OnnxModelAlgorithm` **без разбора имени** — то есть мобильная модель,
-подключённая через `--model`, пойдёт по пути resize, а не тайлов.
+`OnnxModelAlgorithm` **без разбора имени** — даже `colony_seg.onnx` через эти
+пути будет ресайзиться целиком. Tiled-путь production-модели выбирает только
+`register_bundled_models()` для файла `models/colony_seg.onnx`.
 
-Специальный случай (`stem == "colony_mobilenet_v3_small"`) зафиксирован
-тестом `test_tiled_onnx_algorithm.py::test_bundled_compact_model_uses_tiled_adapter_and_legacy_model_is_unchanged`.
+Специальные случаи (`stem == "colony_mobilenet_v3_small"` и `stem == "colony_seg"`)
+зафиксированы тестом `test_tiled_onnx_algorithm.py::test_bundled_colony_models_use_tiled_adapter`.
 Если вы добавите свою тайловую модель, либо расширьте список специальных имён
 в `scan_bundled_models`, либо явно создайте `TiledOnnxModelAlgorithm` в коде.
 
@@ -620,10 +621,10 @@ uv run evaluate --data-root ./test_images
 1. **NN-алгоритмы недоступны в CLI без `--model`.** `register_bundled_models()`
    не вызывается в `testing/__main__.py`.
 
-2. **`--model` всегда создаёт resize-адаптер.** Мобильная модель, подключённая
-   через `--model`, пойдёт по пути «сжать до 512 и растянуть» вместо тайлов.
-   Для честного сравнения положите модель в `models/` и перезапустите
-   приложение — или создайте `TiledOnnxModelAlgorithm` в коде.
+2. **`--model` всегда создаёт resize-адаптер.** Любая модель, включая
+   `colony_seg.onnx`, подключённая через CLI `--model`, пойдёт по пути «сжать до
+   512 и растянуть» вместо production-тайлов. Для проверки production-пути
+   используйте bundled-регистрацию или создайте `TiledOnnxModelAlgorithm` в коде.
 
 3. **Два разных оператора сравнения с порогом.** `OnnxModelAlgorithm`
    использует `raw > threshold`, `TiledOnnxModelAlgorithm` — `>=`.
