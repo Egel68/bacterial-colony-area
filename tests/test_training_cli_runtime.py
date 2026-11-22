@@ -14,7 +14,6 @@ def test_training_cli_help_lists_reproducible_options(capsys):
         "--output",
         "--model",
         "--black-background",
-        "--reuse-prepared-dataset",
         "--seed",
         "--train-ratio",
         "--val-ratio",
@@ -40,7 +39,6 @@ def test_train_colony_preserves_default_model_and_wires_experiment_flags(
     main(["train-colony", "--data-root", "input", "--output", "out"])
     assert calls[-1]["model_name"] == "mobilenet_v3_small_unet"
     assert calls[-1]["black_background"] is False
-    assert calls[-1]["reuse_prepared_dataset"] is False
 
     main(
         [
@@ -56,22 +54,6 @@ def test_train_colony_preserves_default_model_and_wires_experiment_flags(
     )
     assert calls[-1]["model_name"] == "unet"
     assert calls[-1]["black_background"] is True
-    assert calls[-1]["reuse_prepared_dataset"] is False
-
-    main(
-        [
-            "train-colony",
-            "--data-root",
-            "input",
-            "--output",
-            "out",
-            "--model",
-            "unet",
-            "--black-background",
-            "--reuse-prepared-dataset",
-        ]
-    )
-    assert calls[-1]["reuse_prepared_dataset"] is True
 
 
 def test_black_background_cli_requires_fresh_scratch_unet(capsys):
@@ -87,26 +69,6 @@ def test_black_background_cli_requires_fresh_scratch_unet(capsys):
         )
     assert exc.value.code == 2
     assert "fresh run" in capsys.readouterr().err
-
-    with pytest.raises(SystemExit) as exc:
-        main([*base, "--model", "unet", "--reuse-prepared-dataset"])
-    assert exc.value.code == 2
-    assert "requires --black-background" in capsys.readouterr().err
-
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                *base,
-                "--model",
-                "unet",
-                "--black-background",
-                "--reuse-prepared-dataset",
-                "--resume-run",
-                "old-run",
-            ]
-        )
-    assert exc.value.code == 2
-    assert "incompatible with --resume-run" in capsys.readouterr().err
 
 
 def test_training_cli_rejects_invalid_split_ratio(capsys):

@@ -44,6 +44,18 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         ),
         encoding="utf-8",
     )
+    from train.dataset_distribution import prepare_training_dataset
+
+    prepared = tmp_path / "prepared"
+    prepare_training_dataset(source, prepared, black_background=False)
+    prepared_signature = pipeline._tree_signature(prepared)
+    from train.dataset_adapters import CocoBboxImporter
+
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
+    )
     monkeypatch.setattr(pipeline, "run_training", _fake_run_training)
     monkeypatch.setattr(
         pipeline,
@@ -116,7 +128,7 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         [
             "train-colony",
             "--data-root",
-            str(source),
+            str(prepared),
             "--output",
             str(tmp_path / "output"),
             "--epochs",
@@ -130,9 +142,11 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         ]
     )
 
+    assert pipeline._tree_signature(prepared) == prepared_signature
+    assert not (tmp_path / "output/dataset").exists()
     report_path = next((tmp_path / "output").glob("runs/*/report.json"))
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    manifest = json.loads((tmp_path / "output/dataset/dataset.json").read_text())
+    manifest = json.loads((prepared / "dataset.json").read_text())
     assert {sample["subset"] for sample in manifest["samples"]} == {
         "train",
         "val",
@@ -180,6 +194,18 @@ def test_black_background_pipeline_configures_scratch_unet_and_train_only_pairs(
     )
     monkeypatch.setattr(
         adapters, "_find_dish", lambda _image: {"cx": 32, "cy": 32, "r": 30}
+    )
+    from train.dataset_distribution import prepare_training_dataset
+
+    prepared = tmp_path / "prepared"
+    prepare_training_dataset(source, prepared, black_background=True)
+    prepared_signature = pipeline._tree_signature(prepared)
+    from train.dataset_adapters import CocoBboxImporter
+
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
     )
 
     observed = {}
@@ -281,7 +307,7 @@ def test_black_background_pipeline_configures_scratch_unet_and_train_only_pairs(
         [
             "train-colony",
             "--data-root",
-            str(source),
+            str(prepared),
             "--output",
             str(tmp_path / "output"),
             "--model",
@@ -296,14 +322,17 @@ def test_black_background_pipeline_configures_scratch_unet_and_train_only_pairs(
         ]
     )
 
+    assert pipeline._tree_signature(prepared) == prepared_signature
+    assert not (tmp_path / "output/dataset").exists()
     cfg = observed["config"]
     assert events == ["baseline", "train", "retrained"]
     assert cfg.model_name == "unet"
+    assert cfg.data_root == prepared
     assert cfg.pretrained is False
     assert cfg.resume_checkpoint is None
     assert cfg.require_cuda is True
     assert patch_record_subsets == [{"train"}, {"val"}]
-    manifest = json.loads((tmp_path / "output/dataset/dataset.json").read_text())
+    manifest = json.loads((prepared / "dataset.json").read_text())
     assert len(manifest["samples"]) == 12
     for variant in (
         sample for sample in manifest["samples"] if sample["kind"] == "augmented"
@@ -447,7 +476,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     import train.training_pipeline as pipeline
 
     output_root = tmp_path / "output"
-    dataset_root = output_root / "dataset"
+    dataset_root = tmp_path / "prepared"
     dataset_root.mkdir(parents=True)
     records = []
     samples = []
@@ -481,6 +510,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
         encoding="utf-8",
     )
     split_payload = {
+        "strategy": "stratified_source_image_id",
         "seed": 42,
         "ratios": {"train": 0.7, "val": 0.15, "test": 0.15},
         "groups": {
@@ -501,17 +531,12 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     (resume_run / "checkpoints").mkdir(parents=True)
     (resume_run / "checkpoints" / "last.pt").write_bytes(b"checkpoint")
     (resume_run / "checkpoints" / "best.onnx").write_bytes(b"onnx model")
-    source = tmp_path / "source"
-    source.mkdir()
-    coco = {
-        "images": [{"id": i, "file_name": f"{i}.png"} for i in (1, 2, 3)],
-        "annotations": [{"image_id": i, "bbox": [0, 0, 1, 1]} for i in (1, 2, 3)],
-    }
-    (source / "annot_COCO.json").write_text(json.dumps(coco), encoding="utf-8")
+    from train.dataset_adapters import CocoBboxImporter
+
     monkeypatch.setattr(
-        pipeline.CocoBboxImporter,
+        CocoBboxImporter,
         "build",
-        lambda *_args, **_kwargs: pytest.fail("resume must not repeat dataset import"),
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
     )
     received = {}
 
@@ -557,7 +582,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     monkeypatch.setattr(torch, "load", lambda *args, **kwargs: {})
 
     report = pipeline.run_colony_training(
-        data_root=source,
+        data_root=dataset_root,
         output_root=output_root,
         pretrained=False,
         resume_run=resume_run,

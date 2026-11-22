@@ -22,6 +22,7 @@ def test_synthetic_coco_black_background_experiment_is_end_to_end_and_read_only(
     import train.training_pipeline as pipeline
 
     source = tmp_path / "coco-source"
+    prepared = tmp_path / "prepared-training"
     output = tmp_path / "experiment-output"
     source.mkdir()
     images, annotations = [], []
@@ -59,6 +60,11 @@ def test_synthetic_coco_black_background_experiment_is_end_to_end_and_read_only(
     monkeypatch.setattr(
         adapters, "_find_dish", lambda _image: {"cx": 32, "cy": 32, "r": 30}
     )
+    from train.dataset_distribution import prepare_training_dataset
+
+    prepare_training_dataset(
+        source, prepared, seed=42, ratios=(0.70, 0.15, 0.15), black_background=True
+    )
     original_config = pipeline.TrainingConfig
 
     def single_worker_config(**kwargs):
@@ -67,18 +73,10 @@ def test_synthetic_coco_black_background_experiment_is_end_to_end_and_read_only(
         return cfg
 
     monkeypatch.setattr(pipeline, "TrainingConfig", single_worker_config)
-    source_signature_before = pipeline._tree_signature(source)
-    adapters.CocoBboxImporter().build(
-        data_root=source,
-        output_dir=output / "dataset",
-        split=True,
-        seed=42,
-        split_ratios=(0.70, 0.15, 0.15),
-        black_background=True,
-    )
+    source_signature_before = pipeline._tree_signature(prepared)
 
     report = pipeline.run_colony_training(
-        data_root=source,
+        data_root=prepared,
         output_root=output,
         seed=42,
         ratios=(0.70, 0.15, 0.15),
@@ -89,15 +87,13 @@ def test_synthetic_coco_black_background_experiment_is_end_to_end_and_read_only(
         pretrained=False,
         model_name="unet",
         black_background=True,
-        reuse_prepared_dataset=True,
     )
 
-    source_signature_after = pipeline._tree_signature(source)
+    source_signature_after = pipeline._tree_signature(prepared)
     assert source_signature_after == source_signature_before
     assert report["source_signature"]["unchanged"] is True
-    assert report["prepared_dataset_reused"] is True
-    assert report["source_signature"]["before_import"] == source_signature_before
-    assert report["source_signature"]["after_run"] == source_signature_after
+    assert report["source_signature"]["before_training"] == source_signature_before
+    assert report["source_signature"]["after_training"] == source_signature_after
     assert report["training_summary"]["pretrained"] is False
     assert report["training_summary"]["initialization_source"] == "random"
     assert report["training_summary"]["resume_mode"] == "fresh"
@@ -105,7 +101,7 @@ def test_synthetic_coco_black_background_experiment_is_end_to_end_and_read_only(
     assert provenance["pretrained_used_for_current_run"] is False
     assert provenance["resume_mode"] == "fresh"
 
-    dataset_root = output / "dataset"
+    dataset_root = prepared
     manifest = json.loads((dataset_root / "dataset.json").read_text(encoding="utf-8"))
     records = manifest["samples"]
     assert len(records) == 12
