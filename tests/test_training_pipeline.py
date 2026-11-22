@@ -179,7 +179,9 @@ def _make_prepared_snapshot(root):
     return root
 
 
-def test_training_rejects_incomplete_prepared_dataset_before_work(tmp_path, monkeypatch):
+def test_training_rejects_incomplete_prepared_dataset_before_work(
+    tmp_path, monkeypatch
+):
     import sys
     from types import ModuleType, SimpleNamespace
 
@@ -199,12 +201,16 @@ def test_training_rejects_incomplete_prepared_dataset_before_work(tmp_path, monk
     monkeypatch.setattr(
         pipeline,
         "run_training",
-        lambda *_args, **_kwargs: pytest.fail("optimizer must not start on incomplete data"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "optimizer must not start on incomplete data"
+        ),
     )
     monkeypatch.setattr(
         pipeline,
         "evaluate_paired_model",
-        lambda *_args, **_kwargs: pytest.fail("baseline must not run on incomplete data"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "baseline must not run on incomplete data"
+        ),
     )
     output = tmp_path / "run"
 

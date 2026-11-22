@@ -74,14 +74,18 @@ def _write_tar_zst(root: Path, target: Path, hashes: dict[str, str]) -> None:
     try:
         import zstandard
     except ImportError as error:
-        raise RuntimeError("Archive creation requires zstandard in the full environment") from error
+        raise RuntimeError(
+            "Archive creation requires zstandard in the full environment"
+        ) from error
 
     compressor = zstandard.ZstdCompressor(
         level=ARCHIVE_LEVEL, write_checksum=True, write_content_size=False, threads=0
     )
     with Path(target).open("wb") as raw:
         with compressor.stream_writer(raw, closefd=False) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as tar:
+            with tarfile.open(
+                fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT
+            ) as tar:
                 for name in sorted(hashes):
                     source = Path(root) / name
                     info = tarfile.TarInfo(name=name)
@@ -100,7 +104,9 @@ def _extract_tar_zst(archive: Path, destination: Path) -> None:
     try:
         import zstandard
     except ImportError as error:
-        raise RuntimeError("Archive extraction requires zstandard in the full environment") from error
+        raise RuntimeError(
+            "Archive extraction requires zstandard in the full environment"
+        ) from error
 
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=False)
@@ -115,23 +121,32 @@ def _extract_tar_zst(archive: Path, destination: Path) -> None:
                         not relative.parts
                         or relative.is_absolute()
                         or "\\" in member.name
-                        or any(part in {".", ".."} or ":" in part for part in relative.parts)
+                        or any(
+                            part in {".", ".."} or ":" in part
+                            for part in relative.parts
+                        )
                     ):
-                        raise ValueError(f"Unsafe path in training archive: {member.name}")
+                        raise ValueError(
+                            f"Unsafe path in training archive: {member.name}"
+                        )
                     name = relative.as_posix()
                     if name in seen:
                         raise ValueError(f"Duplicate path in training archive: {name}")
                     seen.add(name)
                     target = destination.joinpath(*relative.parts)
                     if not target.resolve().is_relative_to(resolved_root):
-                        raise ValueError(f"Archive path escapes output directory: {member.name}")
+                        raise ValueError(
+                            f"Archive path escapes output directory: {member.name}"
+                        )
                     if member.isdir():
                         target.mkdir(parents=True, exist_ok=True)
                     elif member.isfile():
                         target.parent.mkdir(parents=True, exist_ok=True)
                         source = tar.extractfile(member)
                         if source is None:
-                            raise ValueError(f"Could not read archive member: {member.name}")
+                            raise ValueError(
+                                f"Could not read archive member: {member.name}"
+                            )
                         with source, target.open("xb") as output:
                             shutil.copyfileobj(source, output, length=1024 * 1024)
                         if target.stat().st_size != member.size:
@@ -146,7 +161,11 @@ def _verify_sidecars(archive: Path, extracted: Path) -> None:
         sidecar = sidecars[name]
         if sidecar.exists():
             copy = Path(extracted) / name
-            if not sidecar.is_file() or not copy.is_file() or _sha256(sidecar) != _sha256(copy):
+            if (
+                not sidecar.is_file()
+                or not copy.is_file()
+                or _sha256(sidecar) != _sha256(copy)
+            ):
                 raise ValueError(f"Metadata sidecar differs from archive: {sidecar}")
     report_path = sidecars["archive.json"]
     if report_path.exists():
@@ -169,7 +188,9 @@ def pack_training_dataset(data_root: Path, archive_path: Path) -> dict[str, Any]
     validate_prepared_dataset(root)
     for name in ARCHIVED_METADATA:
         if not (root / name).is_file():
-            raise FileNotFoundError(f"Prepared dataset is missing required file: {name}")
+            raise FileNotFoundError(
+                f"Prepared dataset is missing required file: {name}"
+            )
     if archive.exists():
         raise FileExistsError(f"Refusing to replace existing archive: {archive}")
 
@@ -180,14 +201,18 @@ def pack_training_dataset(data_root: Path, archive_path: Path) -> dict[str, Any]
     source_hashes = _hash_files(root)
     source_bytes = sum((root / name).stat().st_size for name in source_hashes)
 
-    with tempfile.TemporaryDirectory(prefix=".colony-pack-", dir=archive.parent) as workspace:
+    with tempfile.TemporaryDirectory(
+        prefix=".colony-pack-", dir=archive.parent
+    ) as workspace:
         workspace = Path(workspace)
         staged_archive = workspace / archive.name
         _write_tar_zst(root, staged_archive, source_hashes)
         extracted = workspace / "roundtrip"
         _extract_tar_zst(staged_archive, extracted)
         if _hash_files(extracted) != source_hashes:
-            raise RuntimeError("Training archive round-trip SHA-256 verification failed")
+            raise RuntimeError(
+                "Training archive round-trip SHA-256 verification failed"
+            )
 
         archive_bytes = staged_archive.stat().st_size
         report = {
@@ -232,15 +257,21 @@ def unpack_training_archive(archive_path: Path, output_dir: Path) -> dict[str, A
         raise FileNotFoundError(f"Training archive does not exist: {archive}")
     output = Path(output_dir).resolve()
     if output.exists():
-        raise FileExistsError(f"Refusing to replace existing dataset directory: {output}")
+        raise FileExistsError(
+            f"Refusing to replace existing dataset directory: {output}"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix=".colony-unpack-", dir=output.parent) as workspace:
+    with tempfile.TemporaryDirectory(
+        prefix=".colony-unpack-", dir=output.parent
+    ) as workspace:
         staged = Path(workspace) / "dataset"
         _extract_tar_zst(archive, staged)
         for name in ARCHIVED_METADATA:
             if not (staged / name).is_file():
-                raise FileNotFoundError(f"Training archive is missing required file: {name}")
+                raise FileNotFoundError(
+                    f"Training archive is missing required file: {name}"
+                )
         manifest, split = validate_prepared_dataset(staged)
         _verify_sidecars(archive, staged)
         files = len(_hash_files(staged))
@@ -254,5 +285,7 @@ def unpack_training_archive(archive_path: Path, output_dir: Path) -> dict[str, A
         "samples": len(manifest.samples),
         "sources": sources,
         "black_background_variants": variants,
-        "split_counts": {subset: len(split["groups"][subset]) for subset in ("train", "val", "test")},
+        "split_counts": {
+            subset: len(split["groups"][subset]) for subset in ("train", "val", "test")
+        },
     }

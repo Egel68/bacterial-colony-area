@@ -44,7 +44,9 @@ def validate_prepared_dataset(
         ratio_values = tuple(float(ratios[subset]) for subset in SUBSETS)
     except (TypeError, ValueError) as error:
         raise ValueError("Prepared split ratios must be numeric") from error
-    if any(not math.isfinite(value) or value <= 0 for value in ratio_values) or not math.isclose(sum(ratio_values), 1.0):
+    if any(
+        not math.isfinite(value) or value <= 0 for value in ratio_values
+    ) or not math.isclose(sum(ratio_values), 1.0):
         raise ValueError("Prepared split ratios must be positive and sum to 1")
     if split.get("strategy") != "stratified_source_image_id":
         raise ValueError("Prepared split.json has an unsupported grouping strategy")
@@ -59,14 +61,18 @@ def validate_prepared_dataset(
         if not isinstance(subset_groups, list):
             raise ValueError(f"Prepared split group '{subset}' must be a list")
         for group in subset_groups:
-            if not isinstance(group, dict) or not {"image_id", "sample_id"} <= set(group):
+            if not isinstance(group, dict) or not {"image_id", "sample_id"} <= set(
+                group
+            ):
                 raise ValueError(f"Prepared split contains an invalid '{subset}' group")
             image_id = str(group["image_id"])
             sample_id = group["sample_id"]
             if not image_id or not isinstance(sample_id, str) or not sample_id:
                 raise ValueError(f"Prepared split contains an invalid '{subset}' group")
             if image_id in image_ids:
-                raise ValueError(f"Prepared split duplicates COCO image id '{image_id}'")
+                raise ValueError(
+                    f"Prepared split duplicates COCO image id '{image_id}'"
+                )
             if sample_id in assignments:
                 raise ValueError(f"Prepared split duplicates source id '{sample_id}'")
             image_ids.add(image_id)
@@ -81,7 +87,10 @@ def validate_prepared_dataset(
         raise ValueError("Prepared source IDs do not exactly match split.json groups")
     if any(record.subset != assignments[record.id] for record in source_records):
         raise ValueError("Prepared source manifest assignments do not match split.json")
-    if any(not any(record.subset == subset for record in source_records) for subset in SUBSETS):
+    if any(
+        not any(record.subset == subset for record in source_records)
+        for subset in SUBSETS
+    ):
         raise ValueError("Prepared split must have non-empty train/val/test groups")
 
     variants_by_source: dict[str, SampleRecord] = {}
@@ -89,7 +98,11 @@ def validate_prepared_dataset(
         if record.kind == "source":
             continue
         source_id = record.source_id
-        if source_id is None and record.kind == "cropped" and record.id.endswith("_cropped"):
+        if (
+            source_id is None
+            and record.kind == "cropped"
+            and record.id.endswith("_cropped")
+        ):
             source_id = record.id.removesuffix("_cropped")
         if source_id not in sources_by_id:
             raise ValueError(f"Derived record '{record.id}' has no matching source ID")
@@ -102,7 +115,9 @@ def validate_prepared_dataset(
 
     if require_black_background:
         if set(variants_by_source) != set(sources_by_id):
-            raise ValueError("Prepared dataset requires one black-background variant per source")
+            raise ValueError(
+                "Prepared dataset requires one black-background variant per source"
+            )
         for source_id, source in sources_by_id.items():
             variant = variants_by_source[source_id]
             source_geometry = (
@@ -121,9 +136,13 @@ def validate_prepared_dataset(
                 or source_geometry is None
                 or variant_geometry != source_geometry
             ):
-                raise ValueError(f"Black-background pair is inconsistent for '{source_id}'")
+                raise ValueError(
+                    f"Black-background pair is inconsistent for '{source_id}'"
+                )
         if len(manifest.samples) != len(sources_by_id) * 2:
-            raise ValueError("Prepared black-background dataset contains unexpected records")
+            raise ValueError(
+                "Prepared black-background dataset contains unexpected records"
+            )
 
     root_resolved = root.resolve()
     image_shapes: dict[Path, tuple[int, int]] = {}
@@ -136,14 +155,20 @@ def validate_prepared_dataset(
         ):
             relative_path = Path(relative_path)
             if relative_path.is_absolute() or ".." in relative_path.parts:
-                raise ValueError(f"Unsafe {label} path for sample '{record.id}': {relative_path}")
+                raise ValueError(
+                    f"Unsafe {label} path for sample '{record.id}': {relative_path}"
+                )
             full_path = (root / relative_path).resolve()
             if not full_path.is_relative_to(root_resolved):
-                raise ValueError(f"{label.capitalize()} path escapes prepared dataset: {relative_path}")
+                raise ValueError(
+                    f"{label.capitalize()} path escapes prepared dataset: {relative_path}"
+                )
             if full_path not in cache:
                 decoded = cv2.imread(str(full_path), flag)
                 if decoded is None:
-                    raise ValueError(f"Could not decode prepared {label} for '{record.id}': {relative_path}")
+                    raise ValueError(
+                        f"Could not decode prepared {label} for '{record.id}': {relative_path}"
+                    )
                 cache[full_path] = decoded.shape[:2]
             pair_shapes.append(cache[full_path])
         if pair_shapes[0] != pair_shapes[1]:
@@ -164,9 +189,13 @@ def prepare_training_dataset(
     source = Path(data_root).resolve()
     output = Path(output_dir).resolve()
     if output == source or source in output.parents or output in source.parents:
-        raise ValueError("Prepared dataset output must be disjoint from the read-only COCO source")
+        raise ValueError(
+            "Prepared dataset output must be disjoint from the read-only COCO source"
+        )
     if output.exists():
-        raise FileExistsError(f"Refusing to replace existing prepared dataset: {output}")
+        raise FileExistsError(
+            f"Refusing to replace existing prepared dataset: {output}"
+        )
 
     preflight = validate_coco_inputs(source)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -191,10 +220,7 @@ def prepare_training_dataset(
         )
         os.replace(staged_root, output)
 
-    counts = {
-        subset: len(split["groups"][subset])
-        for subset in SUBSETS
-    }
+    counts = {subset: len(split["groups"][subset]) for subset in SUBSETS}
     return {
         "output": str(output),
         "annotated_images": preflight["annotated_images"],

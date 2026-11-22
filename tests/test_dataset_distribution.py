@@ -74,10 +74,21 @@ def test_prepare_materializes_full_dataset_and_repeatable_group_split(
         for group in groups
     }
     manifest = load_manifest(output_a)
-    sources = {record.id: record for record in manifest.samples if record.kind == "source"}
+    sources = {
+        record.id: record for record in manifest.samples if record.kind == "source"
+    }
     variants = [record for record in manifest.samples if record.kind == "augmented"]
     assert set(assignments) == set(sources) == {f"dish-{i}" for i in range(6)}
-    assert len({group["image_id"] for groups in split["groups"].values() for group in groups}) == 6
+    assert (
+        len(
+            {
+                group["image_id"]
+                for groups in split["groups"].values()
+                for group in groups
+            }
+        )
+        == 6
+    )
     for source_id, source_record in sources.items():
         assert source_record.subset == assignments[source_id]
         original_bytes = (source / f"{source_id}.jpg").read_bytes()
@@ -143,4 +154,3 @@ def test_archive_is_deterministic_and_round_trips_all_file_hashes(tmp_path):
         if path.is_file():
             relative = path.relative_to(prepared)
             assert (extracted / relative).read_bytes() == path.read_bytes()
-

@@ -19,7 +19,9 @@ def prepare_main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Validate and materialize a complete COCO training dataset"
     )
-    parser.add_argument("--data-root", default="datasets/22022540", help="COCO source directory")
+    parser.add_argument(
+        "--data-root", default="datasets/22022540", help="COCO source directory"
+    )
     parser.add_argument(
         "--output",
         default="datasets/work/22022540-training",
@@ -52,11 +54,15 @@ def prepare_main(argv: Sequence[str] | None = None) -> None:
         )
     except Exception as error:
         parser.exit(2, f"ERROR: dataset preparation failed: {error}\n")
-    log.info("Подготовка завершена:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
+    log.info(
+        "Подготовка завершена:\n%s", json.dumps(summary, ensure_ascii=False, indent=2)
+    )
 
 
 def pack_main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Pack a prepared dataset into a verified .tar.zst archive")
+    parser = argparse.ArgumentParser(
+        description="Pack a prepared dataset into a verified .tar.zst archive"
+    )
     parser.add_argument("--data-root", default="datasets/work/22022540-training")
     parser.add_argument(
         "--archive", default="datasets/archives/22022540-training.tar.zst"
@@ -67,24 +73,29 @@ def pack_main(argv: Sequence[str] | None = None) -> None:
         summary = pack_training_dataset(Path(args.data_root), Path(args.archive))
     except Exception as error:
         parser.exit(2, f"ERROR: archive creation failed: {error}\n")
-    log.info("Архив и sidecar-метаданные созданы:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
+    log.info(
+        "Архив и sidecar-метаданные созданы:\n%s",
+        json.dumps(summary, ensure_ascii=False, indent=2),
+    )
 
 
 def unpack_main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Verify and extract a .tar.zst training archive")
+    parser = argparse.ArgumentParser(
+        description="Verify and extract a .tar.zst training archive"
+    )
     parser.add_argument(
         "--archive", default="datasets/archives/22022540-training.tar.zst"
     )
-    parser.add_argument(
-        "--output", default="datasets/work/22022540-training"
-    )
+    parser.add_argument("--output", default="datasets/work/22022540-training")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         summary = unpack_training_archive(Path(args.archive), Path(args.output))
     except Exception as error:
         parser.exit(2, f"ERROR: archive extraction failed: {error}\n")
-    log.info("Распаковка завершена:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
+    log.info(
+        "Распаковка завершена:\n%s", json.dumps(summary, ensure_ascii=False, indent=2)
+    )
 
 
 if __name__ == "__main__":

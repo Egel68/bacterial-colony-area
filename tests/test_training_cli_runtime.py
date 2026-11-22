@@ -56,7 +56,6 @@ def test_train_colony_preserves_default_model_and_wires_experiment_flags(
     assert calls[-1]["black_background"] is True
 
 
-
 def test_black_background_cli_requires_fresh_scratch_unet(capsys):
     base = ["train-colony", "--data-root", "input", "--output", "out"]
     with pytest.raises(SystemExit) as exc:
@@ -70,7 +69,6 @@ def test_black_background_cli_requires_fresh_scratch_unet(capsys):
         )
     assert exc.value.code == 2
     assert "fresh run" in capsys.readouterr().err
-
 
 
 def test_training_cli_rejects_invalid_split_ratio(capsys):

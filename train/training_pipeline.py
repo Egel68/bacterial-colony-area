@@ -276,9 +276,11 @@ def run_colony_training(
         raise ValueError("Output root must be disjoint from the prepared dataset")
     resume_run = Path(resume_run).resolve() if resume_run is not None else None
     dataset_root = data_root
-    if output_root.exists() and (
-        not output_root.is_dir() or any(output_root.iterdir())
-    ) and resume_run is None:
+    if (
+        output_root.exists()
+        and (not output_root.is_dir() or any(output_root.iterdir()))
+        and resume_run is None
+    ):
         raise FileExistsError(
             f"Refusing to use non-empty output directory: {output_root}; choose a new path"
         )
