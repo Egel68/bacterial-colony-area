@@ -1,0 +1,2 @@
+# Store only compressed training archives through Git LFS; keep JSON sidecars in Git.
+/datasets/archives/*.tar.zst filter=lfs diff=lfs merge=lfs -text

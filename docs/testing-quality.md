@@ -4,7 +4,7 @@
 структура отчётов. Смежные документы: [architecture.md](architecture.md) —
 модули и их взаимодействие, [algorithms.md](algorithms.md) — справочник
 алгоритмов и контракт моделей, [user-guide.md](user-guide.md) — флаги CLI,
-[datasets.md](datasets.md) — первичные источники и версии наборов.
+[datasets.md](datasets.md) — первичные источники и версии наборов, [colony-segmentation-background-evaluation.md](colony-segmentation-background-evaluation.md) — парные метрики original/black и подробности эксперимента 22022540.
 
 ## 1. Общая схема
 
@@ -187,9 +187,9 @@ class BaseDetectionAlgorithm(ABC):
 прогресса. Параметр `is_cropped` игнорируется: тайлы покрывают весь кадр.
 
 Выбор адаптера делает `scan_bundled_models()` по имени файла в `models/`:
-`colony_mobilenet_v3_small` → тайловый, `colony_seg` и всё остальное → resize.
+`colony_mobilenet_v3_small` и `colony_seg` → тайловый, остальные файлы → resize.
 Флаг `--model` и кнопка «Загрузить модель» такого выбора **не** делают —
-всегда создаётся `OnnxModelAlgorithm`.
+всегда создаётся `OnnxModelAlgorithm` (ресайз целого кадра).
 
 #### Регистрация моделей
 
@@ -198,8 +198,13 @@ class BaseDetectionAlgorithm(ABC):
 в `testing/__main__.py` — поэтому в CLI модели `NN:*` появляются только через
 `--model` (см. [architecture.md § 3](architecture.md#регистрация-встроенных-моделей)).
 
-Готовая модель `models/colony_seg.onnx`: IoU 0.72, Dice 0.83 на валидации
-датасета 22022540. Полный справочник — [algorithms.md](algorithms.md).
+Текущая production-модель `models/colony_seg.onnx` — scratch U-Net, обученная
+на исходных и чёрнофоновых парах 22022540 (seed 42). На paired holdout из 54
+источников: исходный фон — IoU 0.4812, Dice 0.6497, Precision 0.8340, Recall
+0.5322; чёрный фон — IoU 0.4721, Dice 0.6414, Precision 0.8375, Recall 0.5197.
+Overlap тестовых ID с историческим train baseline неизвестен. Детали четырёх
+сравнений — `train/runs/22022540_black_background_seed42/runs/unet_20261107_171657_193829/comparison.json`.
+Полный справочник — [algorithms.md](algorithms.md).
 
 ---
 
@@ -495,7 +500,7 @@ warm-cache classic workload совпадение результатов было
 **Наблюдения:**
 - ClassicHighSensitivity даёт лучший IoU (0.211) и Recall (0.306), но низкую Precision (0.405) — много ложных срабатываний
 - ClassicSolidFill и ClassicLowSensitivity дают лучшую Precision (0.532 и 0.515) и Accuracy, но жертвуют Recall
-- Нейросетевая модель (`models/colony_seg.onnx`) на валидации показывает IoU 0.72 — это существенно выше всех классических алгоритмов
+- Production U-Net на отдельном paired holdout 22022540 показывает IoU 0.4812 на исходном и 0.4721 на чёрном фоне; эти числа нельзя напрямую сравнивать с таблицей classic-алгоритмов из-за разных split и данных. См. §3.3.
 
 ---
 

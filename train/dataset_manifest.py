@@ -66,6 +66,7 @@ class SampleRecord:
     mask: Path  # относительный путь от корня датасета
     subset: Optional[str] = None  # train | val | test | None
     dish: Optional[DishGeometry] = None
+    source_id: Optional[str] = None  # исходный ID для производных записей
 
 
 @dataclass

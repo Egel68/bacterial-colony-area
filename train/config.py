@@ -19,6 +19,7 @@ class TrainingConfig:
     architectures: tuple[str, ...] = ("unet",)
     run_dir: Path = Path("train/runs")
     device: str = "cuda"
+    require_cuda: bool = False
     dashboard: bool = False
     dashboard_port: int = 8765
     patch_training: bool = False

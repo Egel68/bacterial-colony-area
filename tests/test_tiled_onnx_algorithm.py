@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from testing.tiled_onnx_algorithm import TiledOnnxModelAlgorithm, tile_positions
-from testing.onnx_algorithm import OnnxModelAlgorithm, scan_bundled_models
+from testing.onnx_algorithm import scan_bundled_models
 
 
 class _Input:
@@ -132,11 +132,9 @@ def test_missing_onnxruntime_has_clear_cpu_error(monkeypatch):
         algorithm.detect(np.zeros((10, 10, 3), dtype=np.uint8))
 
 
-def test_bundled_compact_model_uses_tiled_adapter_and_legacy_model_is_unchanged(
-    tmp_path,
-):
+def test_bundled_colony_models_use_tiled_adapter(tmp_path):
     (tmp_path / "colony_mobilenet_v3_small.onnx").write_bytes(b"model")
-    (tmp_path / "colony_seg.onnx").write_bytes(b"legacy")
+    (tmp_path / "colony_seg.onnx").write_bytes(b"unet")
 
     algorithms = {
         algorithm.name: algorithm for algorithm in scan_bundled_models(str(tmp_path))
@@ -145,4 +143,9 @@ def test_bundled_compact_model_uses_tiled_adapter_and_legacy_model_is_unchanged(
     assert isinstance(
         algorithms["NN:colony_mobilenet_v3_small"], TiledOnnxModelAlgorithm
     )
-    assert isinstance(algorithms["NN:colony_seg"], OnnxModelAlgorithm)
+    colony_seg = algorithms["NN:colony_seg"]
+    assert isinstance(colony_seg, TiledOnnxModelAlgorithm)
+    assert colony_seg.img_size == 512
+    assert colony_seg.stride == 384
+    assert colony_seg.threshold == 0.5
+    assert colony_seg.output_is_logits is True

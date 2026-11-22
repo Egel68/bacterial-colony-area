@@ -66,11 +66,23 @@
 
 ### Requirement: Reproducible training command and evaluation artifacts
 
-Система SHALL предоставлять CLI-команду, которая по скачанному COCO-датасету выполняет split и импорт масок, обучает выбранную компактную модель, выбирает checkpoint только по validation, экспортирует его в отдельный ONNX-файл и оценивает модель на held-out test. Исходная модель `models/colony_seg.onnx` SHALL оставаться нетронутой; новый артефакт SHALL иметь отдельное имя и путь вывода. Отчёт SHALL включать train/validation/test IoU и Dice, precision и recall, seed и ID разделённых групп, архитектуру и настройки обучения, номер лучшей эпохи, длительности эпох, размер ONNX-файла и CPU latency по полным test-изображениям. Замеры CPU SHALL охватывать подготовку, все тайлы, склейку маски и полный исходный кадр; система SHALL фиксировать характеристики CPU и не SHALL предполагать наличие CUDA при runtime-инференсе.
+Подготовка обучающего набора SHALL выполняться отдельно от обучения и создавать полный материализованный набор с фиксированным split до упаковки или запуска модели. Обучающая CLI-команда SHALL принимать локально распакованный набор с `dataset.json`, `split.json` и всеми указанными файлами изображений и масок, проверять его полноту до baseline-оценки и первого обновления весов, а также SHALL NOT выполнять импорт COCO, растризацию масок, копирование/перезапись изображений или создание чёрнофоновых вариантов во время запуска обучения. Команда SHALL обучать выбранную компактную модель, выбирать checkpoint только по validation, экспортировать его в отдельный ONNX-файл и оценивать на held-out test. Исходная модель `models/colony_seg.onnx` SHALL оставаться нетронутой; новый артефакт SHALL иметь отдельное имя и путь вывода. Отчёт SHALL включать train/validation/test IoU и Dice, precision и recall, seed и ID разделённых групп, архитектуру и настройки обучения, номер лучшей эпохи, длительности эпох, размер ONNX-файла и CPU latency по полным test-изображениям. Замеры CPU SHALL охватывать предобработку изображения для инференса, все тайлы, склейку маски и полный исходный кадр; система SHALL фиксировать характеристики CPU и не SHALL предполагать наличие CUDA при runtime-инференсе. Во время обучения патчи и случайные преобразования SHALL создаваться в памяти и SHALL NOT записываться как файлы изображений.
+
+#### Scenario: Подготовка данных отделена от обучения
+- **WHEN** пользователь готовит набор из локального COCO-источника
+- **THEN** отдельный этап SHALL создать и проверить все файлы изображений/масок, манифест и фиксированный split до запуска обучающей команды
 
 #### Scenario: One command produces deployable model and report
-- **WHEN** CLI запускается на корректном `datasets/22022540` в full-окружении
-- **THEN** создаются материализованный датасет с фиксированным split, run-отчёт, validation-selected ONNX-модель и финальные метрики test
+- **WHEN** train CLI запускается в full-окружении с локальным полным и распакованным набором, подготовленным отдельно из `datasets/22022540`
+- **THEN** команда SHALL проверить `dataset.json`, `split.json` и каждый указанный файл до baseline/optimizer, использовать сохранённые назначения train/val/test, создать run-отчёт, validation-selected ONNX-модель и финальные test-метрики, не создавая файлы изображений или масок
+
+#### Scenario: Неполный подготовленный набор отклоняется
+- **WHEN** отсутствует манифест, split или файл изображения/маски, на который ссылается манифест
+- **THEN** CLI SHALL завершиться с понятной ошибкой до baseline-оценки и обновления весов и SHALL NOT пытаться создать недостающие файлы во время обучения
+
+#### Scenario: Патчи и аугментации не сохраняются на диск
+- **WHEN** обучающий загрузчик выбирает 512×512 фрагмент и применяет случайные преобразования
+- **THEN** фрагмент и преобразования SHALL формироваться в памяти из подготовленных файлов, а новых файлов изображений или масок SHALL не появляться
 
 #### Scenario: CPU benchmark processes full test images
 - **WHEN** измеряется задержка экспортированной модели
@@ -79,3 +91,44 @@
 #### Scenario: Existing model is preserved
 - **WHEN** новая модель экспортируется для UI
 - **THEN** `models/colony_seg.onnx` SHALL остаться неизменённой, а новый файл SHALL быть сохранён отдельно
+
+### Requirement: Scratch U-Net training with background variants
+Эксперимент SHALL обучать архитектуру unet со случайной инициализацией без pretrained-весов и без resume-checkpoint. Оптимизация SHALL выполняться обязательно на CUDA GPU; если CUDA недоступна, запуск SHALL завершиться понятной ошибкой и SHALL NOT переключаться на CPU. В градиентное обучение SHALL попадать только subset=train; checkpoint SHALL выбираться по val, а subset=test SHALL быть исключён из обучения и выбора checkpoint. Фактически использованное CUDA-устройство SHALL фиксироваться в summary/report.
+
+#### Scenario: Model starts from random initialization
+- **WHEN** запускается black-background эксперимент с архитектурой unet
+- **THEN** исходным состоянием весов SHALL быть случайная инициализация, а запуск SHALL обходиться без загрузки pretrained-весов или checkpoint
+
+#### Scenario: Only training groups affect learned weights
+- **WHEN** манифест содержит оригиналы и чёрнофоновые варианты с subset train, val и test
+- **THEN** градиенты SHALL вычисляться только по train; val SHALL использоваться только для выбора checkpoint, а test SHALL быть исключён из optimizer и выбора checkpoint и использоваться только для предусмотренных baseline и post-training оценок
+
+#### Scenario: CUDA is mandatory for optimizer updates
+- **WHEN** запускается black-background experiment без доступного CUDA-устройства
+- **THEN** выполнение SHALL остановиться с ясной ошибкой до optimizer updates и SHALL NOT незаметно обучаться на CPU; при успешном запуске summary SHALL указывать CUDA device
+
+### Requirement: Matched baseline and retrained evaluation
+После полной материализации и проверки dataset эксперимент SHALL до обучения оценить текущую bundled U-Net на held-out test-ID для исходных и чёрнофоновых вариантов. После обучения scratch-U-Net SHALL быть оценена на этих же held-out ID, масках и обоих вариантах фона. Baseline и post-training результаты SHALL использовать одинаковый source-ID набор. Отчёт SHALL указывать, известны ли ID, использованные при обучении исходной модели; неизвестное пересечение SHALL маркироваться как unknown, а не как независимая test-оценка.
+
+#### Scenario: Baseline black-background metrics precede training
+- **WHEN** полный dataset подготовлен и проверен
+- **THEN** baseline SHALL быть оценена на test source ID для original и black вариантов до первого optimizer update; CPU-инференс baseline допускается
+
+#### Scenario: Models are compared on matching samples
+- **WHEN** сформированы baseline и post-training результаты
+- **THEN** каждый результат SHALL содержать одинаковый набор source ID и соответствующие оценки original-background и black-background вариантов
+
+#### Scenario: Original model training membership is unavailable
+- **WHEN** система не может установить ID sample, использованных при обучении текущей модели
+- **THEN** отчёт SHALL явно указывать unknown для независимости baseline test-набора и SHALL NOT выдавать эти метрики за подтверждённую оценку на неиспользованных ранее sample
+
+### Requirement: Pixel confusion matrix and precision-recall reporting
+Для каждой пары модель/фон итоговый отчёт SHALL содержать суммарные pixel-level TP, FP, FN и TN, а также precision и recall, вычисленные из этих сумм. Матрица SHALL иметь строки actual background/colony и столбцы predicted background/colony; отчёт SHALL сохранять соответствующие значения по каждому sample ID.
+
+#### Scenario: Aggregate metrics agree with the confusion matrix
+- **WHEN** итоговая бинарная маска сопоставляется с GT-маской на всех test sample заданного фона
+- **THEN** матрица SHALL быть [[TN, FP], [FN, TP]], precision SHALL равняться TP/(TP+FP), а recall SHALL равняться TP/(TP+FN) с определённой системой обработкой нулевого знаменателя
+
+#### Scenario: Per-sample errors are traceable
+- **WHEN** формируется отчёт по held-out набору
+- **THEN** для каждого source ID и фонового варианта SHALL быть доступны TP, FP, FN, TN, precision и recall

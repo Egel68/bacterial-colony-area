@@ -26,6 +26,53 @@ def test_explicit_test_records_are_not_folded_into_train_or_validation(tmp_path)
     assert [record.id for record in test_dataset.records] == ["test-1", "test-2"]
 
 
+def test_black_background_pairs_inherit_subsets_without_test_leakage(tmp_path):
+    records = []
+    for subset in ("train", "val", "test"):
+        source_id = f"{subset}-dish"
+        records.extend(
+            [
+                SampleRecord(
+                    source_id,
+                    "source",
+                    f"{source_id}.png",
+                    f"{source_id}_mask.png",
+                    subset,
+                ),
+                SampleRecord(
+                    f"{source_id}__black_background",
+                    "augmented",
+                    f"{source_id}_black.png",
+                    f"{source_id}_mask.png",
+                    subset,
+                    source_id=source_id,
+                ),
+            ]
+        )
+    manifest = DatasetManifest("paired", "external", "binary", "reference", records)
+
+    train_records, val_records = _subsets_from_manifest(
+        manifest, val_split=0.9, seed=42
+    )
+    test_dataset = make_test_dataset(tmp_path, records=records)
+
+    assert {record.id for record in train_records} == {
+        "train-dish",
+        "train-dish__black_background",
+    }
+    assert {record.id for record in val_records} == {
+        "val-dish",
+        "val-dish__black_background",
+    }
+    assert {record.id for record in test_dataset.records} == {
+        "test-dish",
+        "test-dish__black_background",
+    }
+    assert not {record.id for record in train_records + val_records} & {
+        record.id for record in test_dataset.records
+    }
+
+
 def test_fixed_test_subset_without_train_and_val_raises():
     manifest = DatasetManifest(
         "fixture",

@@ -44,6 +44,18 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         ),
         encoding="utf-8",
     )
+    from train.dataset_distribution import prepare_training_dataset
+
+    prepared = tmp_path / "prepared"
+    prepare_training_dataset(source, prepared, black_background=False)
+    prepared_signature = pipeline._tree_signature(prepared)
+    from train.dataset_adapters import CocoBboxImporter
+
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
+    )
     monkeypatch.setattr(pipeline, "run_training", _fake_run_training)
     monkeypatch.setattr(
         pipeline,
@@ -116,7 +128,7 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         [
             "train-colony",
             "--data-root",
-            str(source),
+            str(prepared),
             "--output",
             str(tmp_path / "output"),
             "--epochs",
@@ -130,9 +142,11 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         ]
     )
 
+    assert pipeline._tree_signature(prepared) == prepared_signature
+    assert not (tmp_path / "output/dataset").exists()
     report_path = next((tmp_path / "output").glob("runs/*/report.json"))
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    manifest = json.loads((tmp_path / "output/dataset/dataset.json").read_text())
+    manifest = json.loads((prepared / "dataset.json").read_text())
     assert {sample["subset"] for sample in manifest["samples"]} == {
         "train",
         "val",
@@ -145,6 +159,223 @@ def test_training_cli_runs_tiny_dataset_without_pretrained_weights(
         report["test"]["evaluation_mode"] == "onnx_cpu_full_resolution_tiled_test_once"
     )
     assert report["training_summary"]["best_epoch"] == 1
+
+
+def test_black_background_pipeline_configures_scratch_unet_and_train_only_pairs(
+    tmp_path, monkeypatch
+):
+    import train.dataset_adapters as adapters
+    import train.training_pipeline as pipeline
+    from train import models
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    source = tmp_path / "source"
+    source.mkdir()
+    coco_images, annotations = [], []
+    for index in range(6):
+        filename = f"dish-{index}.png"
+        image = np.full((64, 64, 3), (40 + index, 60, 80), dtype=np.uint8)
+        cv2.imwrite(str(source / filename), image)
+        coco_images.append(
+            {"id": index + 1, "file_name": filename, "width": 64, "height": 64}
+        )
+        annotations.append(
+            {
+                "id": index + 1,
+                "image_id": index + 1,
+                "bbox": [18, 18, 24, 24],
+                "category_id": 1 if index < 3 else 2,
+            }
+        )
+    (source / "annot_COCO.json").write_text(
+        json.dumps({"images": coco_images, "annotations": annotations}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        adapters, "_find_dish", lambda _image: {"cx": 32, "cy": 32, "r": 30}
+    )
+    from train.dataset_distribution import prepare_training_dataset
+
+    prepared = tmp_path / "prepared"
+    prepare_training_dataset(source, prepared, black_background=True)
+    prepared_signature = pipeline._tree_signature(prepared)
+    from train.dataset_adapters import CocoBboxImporter
+
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
+    )
+
+    observed = {}
+    events = []
+    original_fake_training = _fake_run_training
+
+    def capture_training_config(cfg, progress_callback=None):
+        observed["config"] = cfg
+        events.append("train")
+        return original_fake_training(cfg, progress_callback)
+
+    monkeypatch.setattr(pipeline, "run_training", capture_training_config)
+    patch_record_subsets = []
+
+    def evaluate_training_subset(_model, records, *_args, **_kwargs):
+        patch_record_subsets.append({record.subset for record in records})
+        return {
+            "mean": {"iou": 0.5, "dice": 0.66},
+            "per_image": {record.id: {"iou": 0.5} for record in records},
+            "n_images": len(records),
+        }
+
+    monkeypatch.setattr(pipeline, "evaluate_patch_records", evaluate_training_subset)
+    monkeypatch.setattr(
+        pipeline,
+        "verify_onnx_cpu_parity",
+        lambda *_args, **_kwargs: {"passed": True},
+    )
+    metric_row = {
+        "tp": 1,
+        "fp": 2,
+        "fn": 3,
+        "tn": 4,
+        "confusion_matrix": [[4, 2], [3, 1]],
+        "precision": 1 / 3,
+        "recall": 1 / 4,
+        "f1": 2 / 7,
+        "iou": 1 / 6,
+        "dice": 2 / 7,
+        "accuracy": 0.5,
+    }
+
+    def fake_paired_evaluation(model_path, records, data_root, **_kwargs):
+        del data_root
+        label = (
+            "baseline" if str(model_path).endswith("colony_seg.onnx") else "retrained"
+        )
+        events.append(label)
+        sources = {
+            record.id: record
+            for record in records
+            if record.kind == "source" and record.subset == "test"
+        }
+        variants = {
+            record.source_id: record
+            for record in records
+            if record.kind == "augmented" and record.subset == "test"
+        }
+        ids = sorted(sources)
+        backgrounds = {}
+        for background, selected in (("original", sources), ("black", variants)):
+            per_sample = {
+                source_id: {
+                    "source_id": source_id,
+                    "record_id": record.id,
+                    "image": str(record.image),
+                    "mask": str(record.mask),
+                    "width": 64,
+                    "height": 64,
+                    **metric_row,
+                }
+                for source_id, record in selected.items()
+            }
+            backgrounds[background] = {
+                "source_ids": ids,
+                "per_sample": per_sample,
+                "summary": metric_row,
+            }
+        return {
+            "path": str(model_path),
+            "sha256": label,
+            "source_ids": ids,
+            "backgrounds": backgrounds,
+        }
+
+    monkeypatch.setattr(pipeline, "evaluate_paired_model", fake_paired_evaluation)
+
+    class _FakeModel:
+        def load_state_dict(self, _state):
+            pass
+
+        def to(self, _device):
+            return self
+
+    monkeypatch.setattr(models, "get_model", lambda *_args, **_kwargs: _FakeModel())
+    monkeypatch.setattr(torch, "load", lambda *_args, **_kwargs: {})
+
+    main(
+        [
+            "train-colony",
+            "--data-root",
+            str(prepared),
+            "--output",
+            str(tmp_path / "output"),
+            "--model",
+            "unet",
+            "--black-background",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "1",
+            "--patches-per-image",
+            "1",
+        ]
+    )
+
+    assert pipeline._tree_signature(prepared) == prepared_signature
+    assert not (tmp_path / "output/dataset").exists()
+    cfg = observed["config"]
+    assert events == ["baseline", "train", "retrained"]
+    assert cfg.model_name == "unet"
+    assert cfg.data_root == prepared
+    assert cfg.pretrained is False
+    assert cfg.resume_checkpoint is None
+    assert cfg.require_cuda is True
+    assert patch_record_subsets == [{"train"}, {"val"}]
+    manifest = json.loads((prepared / "dataset.json").read_text())
+    assert len(manifest["samples"]) == 12
+    for variant in (
+        sample for sample in manifest["samples"] if sample["kind"] == "augmented"
+    ):
+        source_record = next(
+            sample
+            for sample in manifest["samples"]
+            if sample["id"] == variant["source_id"]
+        )
+        assert source_record["subset"] == variant["subset"]
+    report_path = next((tmp_path / "output").glob("runs/*/report.json"))
+    report = json.loads(report_path.read_text())
+    comparison_path = next((tmp_path / "output").glob("runs/*/comparison.json"))
+    comparison = json.loads(comparison_path.read_text())
+    assert report["source_signature"]["unchanged"] is True
+    assert comparison["baseline_training_overlap"] == "unknown"
+    assert comparison["test_source_ids"] == comparison["split_ids"]["test"]
+    assert comparison["seed"] == 42
+    assert comparison["ratios"] == {"train": 0.7, "val": 0.15, "test": 0.15}
+    assert comparison["threshold"] == 0.5
+    assert comparison["configuration"]["architecture"] == "unet"
+    assert comparison["configuration"]["initialization"] == "random"
+    assert comparison["source_provenance"]["unchanged"] is True
+    assert comparison["source_provenance"]["sha256"]
+    paired_report = report["paired_background_experiment"]
+    assert paired_report["test_source_ids"] == comparison["test_source_ids"]
+    for model_name in ("baseline", "retrained"):
+        for background in ("original", "black"):
+            condition = comparison["models"][model_name]["backgrounds"][background]
+            assert condition["source_ids"] == comparison["test_source_ids"]
+            assert set(condition["per_sample"]) == set(comparison["test_source_ids"])
+            assert (
+                paired_report["models"][model_name]["backgrounds"][background][
+                    "summary"
+                ]["confusion_matrix"]
+                == condition["summary"]["confusion_matrix"]
+            )
+    html_path = next((tmp_path / "output").glob("runs/*/comparison.html"))
+    page = html_path.read_text(encoding="utf-8")
+    assert all(source_id in page for source_id in comparison["test_source_ids"])
+    assert "[[4, 2], [3, 1]]" in page
+    assert report["comparison_json"] == str(comparison_path)
+    assert report["comparison_html"] == str(html_path)
 
 
 def test_model_promotion_refuses_to_overwrite_without_explicit_consent(
@@ -245,7 +476,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     import train.training_pipeline as pipeline
 
     output_root = tmp_path / "output"
-    dataset_root = output_root / "dataset"
+    dataset_root = tmp_path / "prepared"
     dataset_root.mkdir(parents=True)
     records = []
     samples = []
@@ -279,6 +510,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
         encoding="utf-8",
     )
     split_payload = {
+        "strategy": "stratified_source_image_id",
         "seed": 42,
         "ratios": {"train": 0.7, "val": 0.15, "test": 0.15},
         "groups": {
@@ -299,17 +531,12 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     (resume_run / "checkpoints").mkdir(parents=True)
     (resume_run / "checkpoints" / "last.pt").write_bytes(b"checkpoint")
     (resume_run / "checkpoints" / "best.onnx").write_bytes(b"onnx model")
-    source = tmp_path / "source"
-    source.mkdir()
-    coco = {
-        "images": [{"id": i, "file_name": f"{i}.png"} for i in (1, 2, 3)],
-        "annotations": [{"image_id": i, "bbox": [0, 0, 1, 1]} for i in (1, 2, 3)],
-    }
-    (source / "annot_COCO.json").write_text(json.dumps(coco), encoding="utf-8")
+    from train.dataset_adapters import CocoBboxImporter
+
     monkeypatch.setattr(
-        pipeline.CocoBboxImporter,
+        CocoBboxImporter,
         "build",
-        lambda *_args, **_kwargs: pytest.fail("resume must not repeat dataset import"),
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
     )
     received = {}
 
@@ -355,7 +582,7 @@ def test_resume_reuses_prepared_dataset_and_checkpoint_without_import(
     monkeypatch.setattr(torch, "load", lambda *args, **kwargs: {})
 
     report = pipeline.run_colony_training(
-        data_root=source,
+        data_root=dataset_root,
         output_root=output_root,
         pretrained=False,
         resume_run=resume_run,

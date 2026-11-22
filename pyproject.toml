@@ -1,6 +1,6 @@
 [project]
 name = "bacterial-colony-analyzer"
-version = "0.2.0"
+version = "3.0.1"
 description = "Анализатор бактериальных колоний на изображениях чашек Петри"
 requires-python = ">=3.13"
 dependencies = [
@@ -66,6 +66,9 @@ bacteria-analyzer = "main:main"
 augment = "train.augment:main"
 test-algorithms = "testing.__main__:main"
 import-22022540 = "train.importer_cli:main"
+prepare-colony-training = "train.dataset_cli:prepare_main"
+pack-colony-training = "train.dataset_cli:pack_main"
+unpack-colony-training = "train.dataset_cli:unpack_main"
 baseline = "testing.__main__:main_baseline"
 evaluate = "testing.__main__:main_evaluate"
 train-colony = "train.colony_cli:main"

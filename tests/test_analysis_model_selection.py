@@ -496,7 +496,10 @@ def test_analysis_cancellation_stops_between_tiles(qtbot, tmp_path, monkeypatch)
     qtbot.waitUntil(lambda: not window._analysis_busy, timeout=5000)
 
     assert "отменён" in window.status_label.text()
-    assert window.btn_apply.isEnabled()
+    qtbot.waitUntil(
+        lambda: not window._analysis_worker_running and window.btn_apply.isEnabled(),
+        timeout=5000,
+    )
     assert window.controller.colony_mask is None
     window.close()
     from testing.registry import _INSTANCES

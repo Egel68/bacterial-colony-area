@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "archive": "22022540-training-webp.tar.zst",
+  "archive_sha256": "76b422c529d0f51e546201fd7b8ac91ac7d7d8993d6495703c1eca57854ece91",
+  "compression": "zstandard",
+  "compression_level": 19,
+  "tar_metadata": "normalized",
+  "files": 1110,
+  "uncompressed_bytes": 1785071333,
+  "archive_bytes": 1769193978,
+  "compressed_to_uncompressed_ratio": 0.9911054786962958,
+  "uncompressed_to_archive_factor": 1.0089743437957825,
+  "dataset_tree_sha256": "a4118379ce25a8bedad9b6ed6d49d5d07a8dd0cce59acd74d8ca0343284c4470",
+  "roundtrip_sha256_verified": true,
+  "metadata_sidecars": {
+    "dataset.json": {
+      "file": "22022540-training-webp.dataset.json",
+      "sha256": "b3abee0a1b20170bbb5112bc79888840cba41d94d2528027c96ec0a697672ae0"
+    },
+    "split.json": {
+      "file": "22022540-training-webp.split.json",
+      "sha256": "48c3d48458671d86094c26beea36f89d8c62ae0598abf57c40e701f106eaa60e"
+    },
+    "annot_COCO.json": {
+      "file": "22022540-training-webp.annot_COCO.json",
+      "sha256": "062f08c159004e89b96f93bea05d95403b01b1fcfb73384f6eda21ba9842e12c"
+    }
+  }
+}

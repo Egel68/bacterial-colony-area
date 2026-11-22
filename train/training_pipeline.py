@@ -15,8 +15,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .background_experiment import (
+    combine_paired_evaluations,
+    evaluate_paired_model,
+    write_comparison_html,
+)
 from .config import TrainingConfig
-from .dataset_adapters import CocoBboxImporter, load_manifest
+from .dataset_adapters import load_manifest
+from .dataset_distribution import validate_prepared_dataset
 from .evaluation import (
     build_training_report,
     compute_binary_metrics,
@@ -33,6 +39,65 @@ def run_training(*args, **kwargs):
     from .train import run_training as torch_run_training
 
     return torch_run_training(*args, **kwargs)
+
+
+def _validate_black_background_dataset(
+    manifest, dataset_root: Path, expected_source_ids: set[str]
+) -> None:
+    """Проверить полноту пар, общий mask и отсутствие split leakage."""
+    source_records = [record for record in manifest.samples if record.kind == "source"]
+    variant_records = [
+        record for record in manifest.samples if record.kind == "augmented"
+    ]
+    sources = {record.id: record for record in source_records}
+    variants = {}
+    for record in variant_records:
+        if record.source_id in variants:
+            raise ValueError(
+                f"Duplicate black-background variant for source '{record.source_id}'"
+            )
+        variants[record.source_id] = record
+
+    if set(sources) != expected_source_ids:
+        raise ValueError(
+            "Prepared dataset source IDs do not exactly match the persisted split"
+        )
+    if set(variants) != expected_source_ids or len(variant_records) != len(sources):
+        raise ValueError(
+            "Prepared dataset must contain exactly one black-background variant per source"
+        )
+    if len(manifest.samples) != len(sources) + len(variants):
+        raise ValueError(
+            "Prepared black-background dataset contains unexpected records"
+        )
+
+    for source_id, source in sources.items():
+        variant = variants[source_id]
+        source_dish = source.dish
+        variant_dish = variant.dish
+        source_geometry = (
+            (source_dish.cx, source_dish.cy, source_dish.r) if source_dish else None
+        )
+        variant_geometry = (
+            (variant_dish.cx, variant_dish.cy, variant_dish.r) if variant_dish else None
+        )
+        if (
+            variant.id != f"{source_id}__black_background"
+            or source.subset not in {"train", "val", "test"}
+            or variant.subset != source.subset
+            or variant.mask != source.mask
+            or source_geometry is None
+            or variant_geometry != source_geometry
+        ):
+            raise ValueError(
+                f"Prepared black-background pair is inconsistent for source '{source_id}'"
+            )
+        for record in (source, variant):
+            for relative_path in (record.image, record.mask):
+                if not (dataset_root / relative_path).is_file():
+                    raise FileNotFoundError(
+                        f"Prepared dataset file is missing for '{source_id}': {relative_path}"
+                    )
 
 
 def _tree_signature(root: Path) -> str:
@@ -146,6 +211,21 @@ def _cpu_full_image_benchmark(
     }
 
 
+def _standard_test_result_from_paired_model(
+    model_result: dict[str, object],
+) -> dict[str, object]:
+    original = model_result["backgrounds"]["original"]
+    per_sample = original["per_sample"]
+    summary = original["summary"]
+    metric_names = ("iou", "dice", "precision", "recall", "f1", "accuracy")
+    return {
+        "mean": {name: summary[name] for name in metric_names},
+        "per_image": {sample["record_id"]: sample for sample in per_sample.values()},
+        "n_images": len(per_sample),
+        "evaluation_mode": "onnx_cpu_full_resolution_tiled_test_once",
+    }
+
+
 def run_colony_training(
     *,
     data_root: Path,
@@ -161,20 +241,46 @@ def run_colony_training(
     allow_overwrite: bool = False,
     cpu_benchmark: bool = False,
     resume_run: Path | None = None,
+    model_name: str = "mobilenet_v3_small_unet",
+    black_background: bool = False,
 ) -> dict[str, object]:
-    data_root = Path(data_root)
+    if model_name not in {"mobilenet_v3_small_unet", "unet"}:
+        raise ValueError(f"Unsupported train-colony model: {model_name}")
+    if black_background and model_name != "unet":
+        raise ValueError("Black-background experiment requires model_name='unet'")
+    if black_background and resume_run is not None:
+        raise ValueError(
+            "Black-background experiment must start from random initialization"
+        )
+    if black_background:
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "CUDA training requires the full PyTorch training environment"
+            ) from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "This experiment requires a CUDA GPU; CPU fallback is disabled."
+            )
+
+    data_root = Path(data_root).resolve()
     output_root = Path(output_root)
-    source_resolved = data_root.resolve()
+    source_resolved = data_root
     output_resolved = output_root.resolve()
     if (
         source_resolved == output_resolved
         or source_resolved in output_resolved.parents
         or output_resolved in source_resolved.parents
     ):
-        raise ValueError("Output root must be disjoint from the read-only COCO source")
+        raise ValueError("Output root must be disjoint from the prepared dataset")
     resume_run = Path(resume_run).resolve() if resume_run is not None else None
-    dataset_root = output_root / "dataset"
-    if output_root.exists() and any(output_root.iterdir()) and resume_run is None:
+    dataset_root = data_root
+    if (
+        output_root.exists()
+        and (not output_root.is_dir() or any(output_root.iterdir()))
+        and resume_run is None
+    ):
         raise FileExistsError(
             f"Refusing to use non-empty output directory: {output_root}; choose a new path"
         )
@@ -183,10 +289,6 @@ def run_colony_training(
         if runs_root not in resume_run.parents:
             raise ValueError("Resume run must be a child of <output>/runs")
         _resume_checkpoint(resume_run)
-        if not (dataset_root / "dataset.json").is_file():
-            raise FileNotFoundError(f"No prepared dataset found at {dataset_root}")
-        if not (dataset_root / "split.json").is_file():
-            raise FileNotFoundError(f"No persisted split found at {dataset_root}")
     if model_promotion_path is not None:
         model_promotion_path = Path(model_promotion_path)
         promotion_resolved = model_promotion_path.resolve()
@@ -195,7 +297,7 @@ def run_colony_training(
             or source_resolved in promotion_resolved.parents
         ):
             raise ValueError(
-                "Promoted model path must not be inside the read-only COCO source"
+                "Promoted model path must not be inside the read-only prepared dataset"
             )
         if model_promotion_path.exists() and not allow_overwrite:
             raise FileExistsError(
@@ -214,55 +316,38 @@ def run_colony_training(
         )
         if promotion_resolved == legacy_model.resolve():
             raise ValueError("Refusing to overwrite the legacy models/colony_seg.onnx")
-    source_signature = _tree_signature(data_root)
-
-    if resume_run is None:
-        CocoBboxImporter().build(
-            data_root=data_root,
-            output_dir=dataset_root,
-            split=True,
-            seed=seed,
-            split_ratios=ratios,
+    baseline_model_path = (
+        Path(__file__).resolve().parents[1] / "models" / "colony_seg.onnx"
+    )
+    if black_background and not baseline_model_path.is_file():
+        raise FileNotFoundError(
+            f"Bundled baseline model not found: {baseline_model_path}"
         )
-    else:
-        split = json.loads((dataset_root / "split.json").read_text(encoding="utf-8"))
-        expected_ratios = dict(zip(("train", "val", "test"), ratios, strict=True))
-        if split.get("seed") != seed or split.get("ratios") != expected_ratios:
-            raise ValueError("Existing split seed/ratios do not match resume arguments")
-        coco = json.loads((data_root / "annot_COCO.json").read_text(encoding="utf-8"))
-        annotated_ids = {
-            str(annotation["image_id"]) for annotation in coco.get("annotations", [])
-        }
-        split_ids = {
-            str(group["image_id"])
-            for groups in split.get("groups", {}).values()
-            for group in groups
-        }
-        if split_ids != annotated_ids:
-            raise ValueError(
-                "Existing split does not account for current COCO image IDs"
-            )
-    source_signature_after_import = _tree_signature(data_root)
-    if source_signature_after_import != source_signature:
-        raise RuntimeError(
-            "Read-only COCO source changed during dataset preparation; "
-            "training was stopped"
+    baseline_evaluation = None
+    manifest, split = validate_prepared_dataset(
+        dataset_root, require_black_background=black_background
+    )
+    if not black_background and any(
+        record.kind == "augmented" and record.id.endswith("__black_background")
+        for record in manifest.samples
+    ):
+        raise ValueError(
+            "Prepared dataset includes black-background variants; pass --black-background"
         )
-    manifest = load_manifest(dataset_root)
-    if resume_run is not None:
-        assignments = {
-            str(group["sample_id"]): subset
-            for subset, groups in split["groups"].items()
-            for group in groups
-        }
-        source_records = [
-            record for record in manifest.samples if record.kind == "source"
-        ]
-        actual_assignments = {record.id: record.subset for record in source_records}
-        if actual_assignments != assignments:
-            raise ValueError(
-                "Prepared source manifest assignments do not match persisted split"
-            )
+    expected_ratios = dict(zip(("train", "val", "test"), ratios, strict=True))
+    if split["seed"] != seed or split["ratios"] != expected_ratios:
+        raise ValueError("Prepared split seed/ratios do not match run arguments")
+    assignments = {
+        group["sample_id"]: subset
+        for subset, groups in split["groups"].items()
+        for group in groups
+    }
+    source_records = [record for record in manifest.samples if record.kind == "source"]
+    actual_assignments = {record.id: record.subset for record in source_records}
+    if actual_assignments != assignments:
+        raise ValueError("Prepared source manifest assignments do not match split.json")
+    if black_background:
+        _validate_black_background_dataset(manifest, dataset_root, set(assignments))
     train_records = [record for record in manifest.samples if record.subset == "train"]
     val_records = [record for record in manifest.samples if record.subset == "val"]
     test_records = [record for record in manifest.samples if record.subset == "test"]
@@ -271,10 +356,20 @@ def run_colony_training(
             f"Split must have non-empty train/val/test: "
             f"{len(train_records)}/{len(val_records)}/{len(test_records)}"
         )
+    source_signature = _tree_signature(dataset_root)
+    if black_background:
+        baseline_evaluation = evaluate_paired_model(
+            baseline_model_path,
+            manifest.samples,
+            dataset_root,
+            threshold=0.5,
+            tile_size=img_size,
+            stride=384,
+        )
 
     cfg = TrainingConfig(
         data_root=dataset_root,
-        model_name="mobilenet_v3_small_unet",
+        model_name=model_name,
         img_size=img_size,
         batch_size=batch_size,
         epochs=epochs,
@@ -283,17 +378,17 @@ def run_colony_training(
         augment=True,
         run_dir=output_root / "runs",
         device="cuda",
+        require_cuda=black_background,
         patch_training=True,
         patches_per_image=patches_per_image,
-        pretrained=pretrained,
+        pretrained=(pretrained if model_name == "mobilenet_v3_small_unet" else False),
         resume_checkpoint=_resume_checkpoint(resume_run),
     )
     summary, train_history, val_history, run_dir = run_training(cfg)
     source_signature_after_training = _tree_signature(data_root)
     if source_signature_after_training != source_signature:
         raise RuntimeError(
-            "Read-only COCO source changed before checkpoint evaluation; "
-            "training report was stopped"
+            "Prepared dataset changed during training; checkpoint evaluation was stopped"
         )
     summary["training_source_sha256"] = source_signature
 
@@ -302,7 +397,11 @@ def run_colony_training(
 
     from .models import get_model
 
-    model = get_model("mobilenet_v3_small_unet", pretrained=False)
+    model = (
+        get_model(model_name, pretrained=False)
+        if model_name == "mobilenet_v3_small_unet"
+        else get_model(model_name)
+    )
     checkpoint_path = run_dir / "checkpoints" / "best.pt"
     model.load_state_dict(
         torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -332,6 +431,26 @@ def run_colony_training(
     )
 
     onnx_path = run_dir / "checkpoints" / "best.onnx"
+    retrained_evaluation = None
+    paired_comparison = None
+    if black_background:
+        if baseline_evaluation is None:
+            raise RuntimeError("Baseline evaluation was not completed before training")
+        retrained_evaluation = evaluate_paired_model(
+            onnx_path,
+            manifest.samples,
+            dataset_root,
+            threshold=0.5,
+            tile_size=img_size,
+            stride=384,
+        )
+        paired_comparison = combine_paired_evaluations(
+            baseline_evaluation,
+            retrained_evaluation,
+            threshold=0.5,
+            tile_size=img_size,
+            stride=384,
+        )
     onnx_parity = verify_onnx_cpu_parity(
         model,
         onnx_path,
@@ -349,11 +468,18 @@ def run_colony_training(
         if cpu_benchmark
         else None
     )
-    test_result = (
-        benchmark_result["metrics"]
-        if benchmark_result is not None
-        else evaluate_test_subset(model, dataset_root, tile_size=img_size)
-    )
+    if black_background:
+        if paired_comparison is None:
+            raise RuntimeError("Paired background comparison was not generated")
+        test_result = _standard_test_result_from_paired_model(
+            paired_comparison["models"]["retrained"]
+        )
+    else:
+        test_result = (
+            benchmark_result["metrics"]
+            if benchmark_result is not None
+            else evaluate_test_subset(model, dataset_root, tile_size=img_size)
+        )
     report = build_training_report(
         data_root=dataset_root,
         cfg=cfg,
@@ -367,10 +493,9 @@ def run_colony_training(
         onnx_parity=onnx_parity,
     )
     report["source_signature"] = {
-        "before_import": source_signature,
-        "after_import": source_signature_after_import,
-        "after_run": None,
-        "unchanged": None,
+        "before_training": source_signature,
+        "after_training": source_signature_after_training,
+        "unchanged": True,
     }
     report["cpu"].update(
         {
@@ -384,18 +509,72 @@ def run_colony_training(
         report["resumed_from"] = str(_resume_checkpoint(resume_run))
 
     report_path = run_dir / "report.json"
-    source_signature_after_run = _tree_signature(data_root)
-    if source_signature_after_run != source_signature:
-        raise RuntimeError(
-            "Read-only COCO source changed during training/evaluation; "
-            "report promotion was stopped"
+    if paired_comparison is not None:
+        split_ids = {
+            subset: sorted(
+                record.id
+                for record in manifest.samples
+                if record.kind == "source" and record.subset == subset
+            )
+            for subset in ("train", "val", "test")
+        }
+        if paired_comparison["test_source_ids"] != split_ids["test"]:
+            raise RuntimeError("Paired inference IDs differ from persisted test split")
+        paired_comparison.update(
+            {
+                "seed": seed,
+                "ratios": dict(zip(("train", "val", "test"), ratios, strict=True)),
+                "split_ids": split_ids,
+                "configuration": {
+                    "architecture": model_name,
+                    "initialization": "random",
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                    "patches_per_image": patches_per_image,
+                    "img_size": img_size,
+                    "seed": seed,
+                    "pretrained": False,
+                    "resume_checkpoint": None,
+                    "online_augmentation": cfg.augment,
+                },
+                "source_provenance": {
+                    "path": str(data_root.resolve()),
+                    "sha256": source_signature_after_training,
+                    "hash_algorithm": "sha256",
+                    "unchanged": True,
+                },
+            }
         )
-    report["source_signature"] = {
-        "before_import": source_signature,
-        "after_import": source_signature_after_import,
-        "after_run": source_signature_after_run,
-        "unchanged": True,
-    }
+        paired_comparison["models"]["baseline"].update(
+            {
+                "label": "Bundled baseline",
+                "training_membership": "unknown",
+            }
+        )
+        paired_comparison["models"]["retrained"].update(
+            {
+                "label": "Scratch U-Net",
+                "architecture": model_name,
+                "initialization": "random",
+                "checkpoint": str(checkpoint_path),
+                "initialization_provenance": summary.get(
+                    "initialization_provenance", {}
+                ),
+                "best_epoch": summary.get("best_epoch"),
+                "best_val_iou": summary.get("best_iou"),
+            }
+        )
+        comparison_json_path = run_dir / "comparison.json"
+        comparison_html_path = run_dir / "comparison.html"
+        comparison_json_path.write_text(
+            json.dumps(paired_comparison, indent=2, ensure_ascii=False, default=str)
+            + "\n",
+            encoding="utf-8",
+        )
+        write_comparison_html(paired_comparison, comparison_html_path)
+        report["paired_background_experiment"] = paired_comparison
+        report["comparison_json"] = str(comparison_json_path)
+        report["comparison_html"] = str(comparison_html_path)
     report_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False, default=str) + "\n",
         encoding="utf-8",

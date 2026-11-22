@@ -223,3 +223,51 @@ def test_validation_first_patch_is_anchored_to_foreground(tmp_path):
     _, mask = dataset._load_pair(record)
 
     assert np.any(mask[y : y + dataset.patch_size, x : x + dataset.patch_size] > 127)
+
+
+def test_patch_sampling_and_augmentations_never_write_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(torch.Tensor, "share_memory_", lambda tensor: tensor)
+    image = np.full((64, 64, 3), (30, 70, 120), dtype=np.uint8)
+    black_background_image = np.zeros((64, 64, 3), dtype=np.uint8)
+    mask = np.zeros((64, 64), dtype=np.uint8)
+    cv2.circle(mask, (32, 32), 12, 255, -1)
+    image[mask > 0] = (0, 0, 255)
+    black_background_image[mask > 0] = (0, 0, 255)
+    assert cv2.imwrite(str(tmp_path / "source.png"), image)
+    assert cv2.imwrite(str(tmp_path / "source_mask.png"), mask)
+    assert cv2.imwrite(
+        str(tmp_path / "source_black_background.png"), black_background_image
+    )
+    records = [
+        SampleRecord("source", "source", "source.png", "source_mask.png", "train"),
+        SampleRecord(
+            "source__black_background",
+            "augmented",
+            "source_black_background.png",
+            "source_mask.png",
+            "train",
+            source_id="source",
+        ),
+    ]
+    before = {
+        path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()
+    }
+    dataset = ColonyPatchDataset(
+        records,
+        tmp_path,
+        patch_size=32,
+        patches_per_image=2,
+        seed=17,
+        augment=True,
+        training=True,
+    )
+
+    patches = [dataset[index] for index in range(len(dataset))]
+
+    assert len(patches) == 4
+    assert all(image_patch.shape == (3, 32, 32) for image_patch, _ in patches)
+    assert all(mask_patch.shape == (1, 32, 32) for _, mask_patch in patches)
+    after = {
+        path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()
+    }
+    assert after == before

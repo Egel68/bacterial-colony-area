@@ -94,7 +94,7 @@ class OnnxModelAlgorithm(BaseDetectionAlgorithm):
         return binary
 
 
-def scan_bundled_models(models_dir: str = "") -> list["OnnxModelAlgorithm"]:
+def scan_bundled_models(models_dir: str = "") -> list[BaseDetectionAlgorithm]:
     """Сканирует папку на *.onnx и возвращает список адаптеров встроенных моделей.
 
     models_dir по умолчанию — подпапка models/ рядом с пакетом testing.
@@ -122,11 +122,20 @@ def scan_bundled_models(models_dir: str = "") -> list["OnnxModelAlgorithm"]:
             )
             continue
         if model_file.stem == "colony_seg":
+            from .tiled_onnx_algorithm import TiledOnnxModelAlgorithm
+
             algos.append(
-                OnnxModelAlgorithm(
+                TiledOnnxModelAlgorithm(
                     model_path=str(model_file),
                     name="NN:colony_seg",
-                    description=f"Legacy ONNX-модель: {model_file.name}",
+                    description=(
+                        "U-Net: CPU-инференс на полном разрешении с "
+                        "перекрывающимися тайлами"
+                    ),
+                    img_size=512,
+                    stride=384,
+                    threshold=0.5,
+                    output_is_logits=True,
                 )
             )
             continue
@@ -157,7 +166,7 @@ def _default_models_dir() -> Path:
 
 def register_bundled_models(
     models_dir: str = "",
-) -> list["OnnxModelAlgorithm"]:
+) -> list[BaseDetectionAlgorithm]:
     """Регистрирует встроенные модели в реестре алгоритмов. Возвращает зарегистрированных."""
     from .registry import register_algorithm_instance
 

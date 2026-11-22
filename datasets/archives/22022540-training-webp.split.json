@@ -1,0 +1,1862 @@
+{
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "strategy": "stratified_source_image_id",
+  "groups": {
+    "train": [
+      {
+        "image_id": "1",
+        "sample_id": "sp01_img01",
+        "category_id": 1
+      },
+      {
+        "image_id": "3",
+        "sample_id": "sp01_img03",
+        "category_id": 1
+      },
+      {
+        "image_id": "4",
+        "sample_id": "sp01_img04",
+        "category_id": 1
+      },
+      {
+        "image_id": "5",
+        "sample_id": "sp01_img05",
+        "category_id": 1
+      },
+      {
+        "image_id": "7",
+        "sample_id": "sp01_img07",
+        "category_id": 1
+      },
+      {
+        "image_id": "9",
+        "sample_id": "sp01_img09",
+        "category_id": 1
+      },
+      {
+        "image_id": "11",
+        "sample_id": "sp01_img11",
+        "category_id": 1
+      },
+      {
+        "image_id": "12",
+        "sample_id": "sp01_img12",
+        "category_id": 1
+      },
+      {
+        "image_id": "13",
+        "sample_id": "sp02_img01",
+        "category_id": 2
+      },
+      {
+        "image_id": "15",
+        "sample_id": "sp02_img03",
+        "category_id": 2
+      },
+      {
+        "image_id": "17",
+        "sample_id": "sp02_img05",
+        "category_id": 2
+      },
+      {
+        "image_id": "18",
+        "sample_id": "sp02_img06",
+        "category_id": 2
+      },
+      {
+        "image_id": "19",
+        "sample_id": "sp02_img07",
+        "category_id": 2
+      },
+      {
+        "image_id": "21",
+        "sample_id": "sp02_img09",
+        "category_id": 2
+      },
+      {
+        "image_id": "22",
+        "sample_id": "sp02_img10",
+        "category_id": 2
+      },
+      {
+        "image_id": "23",
+        "sample_id": "sp03_img01",
+        "category_id": 3
+      },
+      {
+        "image_id": "24",
+        "sample_id": "sp03_img02",
+        "category_id": 3
+      },
+      {
+        "image_id": "25",
+        "sample_id": "sp03_img03",
+        "category_id": 3
+      },
+      {
+        "image_id": "27",
+        "sample_id": "sp03_img05",
+        "category_id": 3
+      },
+      {
+        "image_id": "28",
+        "sample_id": "sp03_img06",
+        "category_id": 3
+      },
+      {
+        "image_id": "29",
+        "sample_id": "sp03_img07",
+        "category_id": 3
+      },
+      {
+        "image_id": "30",
+        "sample_id": "sp03_img08",
+        "category_id": 3
+      },
+      {
+        "image_id": "33",
+        "sample_id": "sp03_img11",
+        "category_id": 3
+      },
+      {
+        "image_id": "37",
+        "sample_id": "sp04_img03",
+        "category_id": 4
+      },
+      {
+        "image_id": "38",
+        "sample_id": "sp04_img04",
+        "category_id": 4
+      },
+      {
+        "image_id": "39",
+        "sample_id": "sp04_img05",
+        "category_id": 4
+      },
+      {
+        "image_id": "40",
+        "sample_id": "sp04_img06",
+        "category_id": 4
+      },
+      {
+        "image_id": "41",
+        "sample_id": "sp05_img01",
+        "category_id": 5
+      },
+      {
+        "image_id": "43",
+        "sample_id": "sp05_img03",
+        "category_id": 5
+      },
+      {
+        "image_id": "44",
+        "sample_id": "sp05_img04",
+        "category_id": 5
+      },
+      {
+        "image_id": "47",
+        "sample_id": "sp05_img07",
+        "category_id": 5
+      },
+      {
+        "image_id": "48",
+        "sample_id": "sp05_img08",
+        "category_id": 5
+      },
+      {
+        "image_id": "49",
+        "sample_id": "sp05_img09",
+        "category_id": 5
+      },
+      {
+        "image_id": "51",
+        "sample_id": "sp05_img11",
+        "category_id": 5
+      },
+      {
+        "image_id": "52",
+        "sample_id": "sp05_img12",
+        "category_id": 5
+      },
+      {
+        "image_id": "53",
+        "sample_id": "sp05_img13",
+        "category_id": 5
+      },
+      {
+        "image_id": "54",
+        "sample_id": "sp05_img14",
+        "category_id": 5
+      },
+      {
+        "image_id": "55",
+        "sample_id": "sp05_img15",
+        "category_id": 5
+      },
+      {
+        "image_id": "57",
+        "sample_id": "sp05_img17",
+        "category_id": 5
+      },
+      {
+        "image_id": "59",
+        "sample_id": "sp06_img01",
+        "category_id": 6
+      },
+      {
+        "image_id": "60",
+        "sample_id": "sp06_img02",
+        "category_id": 6
+      },
+      {
+        "image_id": "64",
+        "sample_id": "sp06_img06",
+        "category_id": 6
+      },
+      {
+        "image_id": "65",
+        "sample_id": "sp06_img07",
+        "category_id": 6
+      },
+      {
+        "image_id": "66",
+        "sample_id": "sp06_img08",
+        "category_id": 6
+      },
+      {
+        "image_id": "67",
+        "sample_id": "sp06_img09",
+        "category_id": 6
+      },
+      {
+        "image_id": "68",
+        "sample_id": "sp06_img10",
+        "category_id": 6
+      },
+      {
+        "image_id": "70",
+        "sample_id": "sp06_img12",
+        "category_id": 6
+      },
+      {
+        "image_id": "72",
+        "sample_id": "sp06_img14",
+        "category_id": 6
+      },
+      {
+        "image_id": "73",
+        "sample_id": "sp06_img15",
+        "category_id": 6
+      },
+      {
+        "image_id": "75",
+        "sample_id": "sp06_img17",
+        "category_id": 6
+      },
+      {
+        "image_id": "77",
+        "sample_id": "sp06_img19",
+        "category_id": 6
+      },
+      {
+        "image_id": "78",
+        "sample_id": "sp06_img20",
+        "category_id": 6
+      },
+      {
+        "image_id": "79",
+        "sample_id": "sp06_img21",
+        "category_id": 6
+      },
+      {
+        "image_id": "80",
+        "sample_id": "sp06_img22",
+        "category_id": 6
+      },
+      {
+        "image_id": "83",
+        "sample_id": "sp06_img25",
+        "category_id": 6
+      },
+      {
+        "image_id": "84",
+        "sample_id": "sp06_img26",
+        "category_id": 6
+      },
+      {
+        "image_id": "85",
+        "sample_id": "sp06_img27",
+        "category_id": 6
+      },
+      {
+        "image_id": "86",
+        "sample_id": "sp06_img28",
+        "category_id": 6
+      },
+      {
+        "image_id": "87",
+        "sample_id": "sp06_img29",
+        "category_id": 6
+      },
+      {
+        "image_id": "88",
+        "sample_id": "sp06_img30",
+        "category_id": 6
+      },
+      {
+        "image_id": "89",
+        "sample_id": "sp06_img31",
+        "category_id": 6
+      },
+      {
+        "image_id": "90",
+        "sample_id": "sp06_img32",
+        "category_id": 6
+      },
+      {
+        "image_id": "92",
+        "sample_id": "sp06_img34",
+        "category_id": 6
+      },
+      {
+        "image_id": "93",
+        "sample_id": "sp06_img35",
+        "category_id": 6
+      },
+      {
+        "image_id": "94",
+        "sample_id": "sp07_img01",
+        "category_id": 7
+      },
+      {
+        "image_id": "95",
+        "sample_id": "sp07_img02",
+        "category_id": 7
+      },
+      {
+        "image_id": "96",
+        "sample_id": "sp07_img03",
+        "category_id": 7
+      },
+      {
+        "image_id": "97",
+        "sample_id": "sp07_img04",
+        "category_id": 7
+      },
+      {
+        "image_id": "98",
+        "sample_id": "sp07_img05",
+        "category_id": 7
+      },
+      {
+        "image_id": "99",
+        "sample_id": "sp07_img06",
+        "category_id": 7
+      },
+      {
+        "image_id": "103",
+        "sample_id": "sp07_img10",
+        "category_id": 7
+      },
+      {
+        "image_id": "105",
+        "sample_id": "sp07_img12",
+        "category_id": 7
+      },
+      {
+        "image_id": "106",
+        "sample_id": "sp08_img01",
+        "category_id": 8
+      },
+      {
+        "image_id": "107",
+        "sample_id": "sp08_img02",
+        "category_id": 8
+      },
+      {
+        "image_id": "108",
+        "sample_id": "sp08_img03",
+        "category_id": 8
+      },
+      {
+        "image_id": "111",
+        "sample_id": "sp08_img06",
+        "category_id": 8
+      },
+      {
+        "image_id": "112",
+        "sample_id": "sp08_img07",
+        "category_id": 8
+      },
+      {
+        "image_id": "113",
+        "sample_id": "sp08_img08",
+        "category_id": 8
+      },
+      {
+        "image_id": "114",
+        "sample_id": "sp08_img09",
+        "category_id": 8
+      },
+      {
+        "image_id": "115",
+        "sample_id": "sp08_img10",
+        "category_id": 8
+      },
+      {
+        "image_id": "119",
+        "sample_id": "sp10_img02",
+        "category_id": 10
+      },
+      {
+        "image_id": "120",
+        "sample_id": "sp10_img03",
+        "category_id": 10
+      },
+      {
+        "image_id": "122",
+        "sample_id": "sp10_img05",
+        "category_id": 10
+      },
+      {
+        "image_id": "123",
+        "sample_id": "sp10_img06",
+        "category_id": 10
+      },
+      {
+        "image_id": "124",
+        "sample_id": "sp10_img07",
+        "category_id": 10
+      },
+      {
+        "image_id": "125",
+        "sample_id": "sp10_img08",
+        "category_id": 10
+      },
+      {
+        "image_id": "126",
+        "sample_id": "sp10_img09",
+        "category_id": 10
+      },
+      {
+        "image_id": "128",
+        "sample_id": "sp10_img11",
+        "category_id": 10
+      },
+      {
+        "image_id": "130",
+        "sample_id": "sp10_img13",
+        "category_id": 10
+      },
+      {
+        "image_id": "131",
+        "sample_id": "sp10_img14",
+        "category_id": 10
+      },
+      {
+        "image_id": "133",
+        "sample_id": "sp10_img16",
+        "category_id": 10
+      },
+      {
+        "image_id": "134",
+        "sample_id": "sp10_img17",
+        "category_id": 10
+      },
+      {
+        "image_id": "136",
+        "sample_id": "sp10_img19",
+        "category_id": 10
+      },
+      {
+        "image_id": "137",
+        "sample_id": "sp10_img20",
+        "category_id": 10
+      },
+      {
+        "image_id": "138",
+        "sample_id": "sp10_img21",
+        "category_id": 10
+      },
+      {
+        "image_id": "139",
+        "sample_id": "sp11_img01",
+        "category_id": 11
+      },
+      {
+        "image_id": "141",
+        "sample_id": "sp11_img03",
+        "category_id": 11
+      },
+      {
+        "image_id": "142",
+        "sample_id": "sp11_img04",
+        "category_id": 11
+      },
+      {
+        "image_id": "145",
+        "sample_id": "sp12_img02",
+        "category_id": 12
+      },
+      {
+        "image_id": "146",
+        "sample_id": "sp12_img03",
+        "category_id": 12
+      },
+      {
+        "image_id": "147",
+        "sample_id": "sp12_img04",
+        "category_id": 12
+      },
+      {
+        "image_id": "148",
+        "sample_id": "sp12_img05",
+        "category_id": 12
+      },
+      {
+        "image_id": "149",
+        "sample_id": "sp12_img06",
+        "category_id": 12
+      },
+      {
+        "image_id": "150",
+        "sample_id": "sp12_img07",
+        "category_id": 12
+      },
+      {
+        "image_id": "153",
+        "sample_id": "sp13_img01",
+        "category_id": 13
+      },
+      {
+        "image_id": "154",
+        "sample_id": "sp13_img02",
+        "category_id": 13
+      },
+      {
+        "image_id": "155",
+        "sample_id": "sp13_img03",
+        "category_id": 13
+      },
+      {
+        "image_id": "157",
+        "sample_id": "sp13_img05",
+        "category_id": 13
+      },
+      {
+        "image_id": "159",
+        "sample_id": "sp14_img01",
+        "category_id": 14
+      },
+      {
+        "image_id": "163",
+        "sample_id": "sp14_img05",
+        "category_id": 14
+      },
+      {
+        "image_id": "165",
+        "sample_id": "sp14_img07",
+        "category_id": 14
+      },
+      {
+        "image_id": "166",
+        "sample_id": "sp14_img08",
+        "category_id": 14
+      },
+      {
+        "image_id": "167",
+        "sample_id": "sp14_img09",
+        "category_id": 14
+      },
+      {
+        "image_id": "169",
+        "sample_id": "sp14_img11",
+        "category_id": 14
+      },
+      {
+        "image_id": "170",
+        "sample_id": "sp14_img12",
+        "category_id": 14
+      },
+      {
+        "image_id": "171",
+        "sample_id": "sp14_img13",
+        "category_id": 14
+      },
+      {
+        "image_id": "172",
+        "sample_id": "sp14_img14",
+        "category_id": 14
+      },
+      {
+        "image_id": "173",
+        "sample_id": "sp14_img15",
+        "category_id": 14
+      },
+      {
+        "image_id": "174",
+        "sample_id": "sp14_img16",
+        "category_id": 14
+      },
+      {
+        "image_id": "176",
+        "sample_id": "sp14_img18",
+        "category_id": 14
+      },
+      {
+        "image_id": "177",
+        "sample_id": "sp15_img01",
+        "category_id": 15
+      },
+      {
+        "image_id": "179",
+        "sample_id": "sp15_img03",
+        "category_id": 15
+      },
+      {
+        "image_id": "180",
+        "sample_id": "sp15_img04",
+        "category_id": 15
+      },
+      {
+        "image_id": "183",
+        "sample_id": "sp15_img07",
+        "category_id": 15
+      },
+      {
+        "image_id": "184",
+        "sample_id": "sp15_img08",
+        "category_id": 15
+      },
+      {
+        "image_id": "185",
+        "sample_id": "sp15_img09",
+        "category_id": 15
+      },
+      {
+        "image_id": "188",
+        "sample_id": "sp16_img03",
+        "category_id": 16
+      },
+      {
+        "image_id": "189",
+        "sample_id": "sp16_img04",
+        "category_id": 16
+      },
+      {
+        "image_id": "190",
+        "sample_id": "sp16_img05",
+        "category_id": 16
+      },
+      {
+        "image_id": "193",
+        "sample_id": "sp16_img08",
+        "category_id": 16
+      },
+      {
+        "image_id": "194",
+        "sample_id": "sp16_img09",
+        "category_id": 16
+      },
+      {
+        "image_id": "195",
+        "sample_id": "sp16_img10",
+        "category_id": 16
+      },
+      {
+        "image_id": "196",
+        "sample_id": "sp16_img11",
+        "category_id": 16
+      },
+      {
+        "image_id": "197",
+        "sample_id": "sp16_img12",
+        "category_id": 16
+      },
+      {
+        "image_id": "199",
+        "sample_id": "sp16_img14",
+        "category_id": 16
+      },
+      {
+        "image_id": "200",
+        "sample_id": "sp16_img15",
+        "category_id": 16
+      },
+      {
+        "image_id": "201",
+        "sample_id": "sp16_img16",
+        "category_id": 16
+      },
+      {
+        "image_id": "202",
+        "sample_id": "sp17_img01",
+        "category_id": 17
+      },
+      {
+        "image_id": "205",
+        "sample_id": "sp18_img01",
+        "category_id": 18
+      },
+      {
+        "image_id": "206",
+        "sample_id": "sp18_img02",
+        "category_id": 18
+      },
+      {
+        "image_id": "207",
+        "sample_id": "sp18_img03",
+        "category_id": 18
+      },
+      {
+        "image_id": "208",
+        "sample_id": "sp18_img04",
+        "category_id": 18
+      },
+      {
+        "image_id": "211",
+        "sample_id": "sp18_img07",
+        "category_id": 18
+      },
+      {
+        "image_id": "213",
+        "sample_id": "sp18_img09",
+        "category_id": 18
+      },
+      {
+        "image_id": "215",
+        "sample_id": "sp18_img11",
+        "category_id": 18
+      },
+      {
+        "image_id": "216",
+        "sample_id": "sp18_img12",
+        "category_id": 18
+      },
+      {
+        "image_id": "217",
+        "sample_id": "sp19_img01",
+        "category_id": 19
+      },
+      {
+        "image_id": "218",
+        "sample_id": "sp19_img02",
+        "category_id": 19
+      },
+      {
+        "image_id": "219",
+        "sample_id": "sp19_img03",
+        "category_id": 19
+      },
+      {
+        "image_id": "220",
+        "sample_id": "sp19_img04",
+        "category_id": 19
+      },
+      {
+        "image_id": "221",
+        "sample_id": "sp19_img05",
+        "category_id": 19
+      },
+      {
+        "image_id": "222",
+        "sample_id": "sp19_img06",
+        "category_id": 19
+      },
+      {
+        "image_id": "223",
+        "sample_id": "sp19_img07",
+        "category_id": 19
+      },
+      {
+        "image_id": "225",
+        "sample_id": "sp19_img09",
+        "category_id": 19
+      },
+      {
+        "image_id": "226",
+        "sample_id": "sp19_img10",
+        "category_id": 19
+      },
+      {
+        "image_id": "228",
+        "sample_id": "sp19_img12",
+        "category_id": 19
+      },
+      {
+        "image_id": "232",
+        "sample_id": "sp19_img16",
+        "category_id": 19
+      },
+      {
+        "image_id": "233",
+        "sample_id": "sp19_img17",
+        "category_id": 19
+      },
+      {
+        "image_id": "234",
+        "sample_id": "sp19_img18",
+        "category_id": 19
+      },
+      {
+        "image_id": "237",
+        "sample_id": "sp19_img21",
+        "category_id": 19
+      },
+      {
+        "image_id": "238",
+        "sample_id": "sp19_img22",
+        "category_id": 19
+      },
+      {
+        "image_id": "239",
+        "sample_id": "sp19_img23",
+        "category_id": 19
+      },
+      {
+        "image_id": "240",
+        "sample_id": "sp19_img24",
+        "category_id": 19
+      },
+      {
+        "image_id": "241",
+        "sample_id": "sp20_img01",
+        "category_id": 20
+      },
+      {
+        "image_id": "242",
+        "sample_id": "sp20_img02",
+        "category_id": 20
+      },
+      {
+        "image_id": "244",
+        "sample_id": "sp20_img04",
+        "category_id": 20
+      },
+      {
+        "image_id": "246",
+        "sample_id": "sp20_img06",
+        "category_id": 20
+      },
+      {
+        "image_id": "248",
+        "sample_id": "sp21_img02",
+        "category_id": 21
+      },
+      {
+        "image_id": "250",
+        "sample_id": "sp21_img05",
+        "category_id": 21
+      },
+      {
+        "image_id": "253",
+        "sample_id": "sp21_img08",
+        "category_id": 21
+      },
+      {
+        "image_id": "254",
+        "sample_id": "sp21_img10",
+        "category_id": 21
+      },
+      {
+        "image_id": "255",
+        "sample_id": "sp21_img11",
+        "category_id": 21
+      },
+      {
+        "image_id": "256",
+        "sample_id": "sp21_img12",
+        "category_id": 21
+      },
+      {
+        "image_id": "259",
+        "sample_id": "sp21_img16",
+        "category_id": 21
+      },
+      {
+        "image_id": "260",
+        "sample_id": "sp21_img17",
+        "category_id": 21
+      },
+      {
+        "image_id": "261",
+        "sample_id": "sp21_img18",
+        "category_id": 21
+      },
+      {
+        "image_id": "262",
+        "sample_id": "sp21_img19",
+        "category_id": 21
+      },
+      {
+        "image_id": "263",
+        "sample_id": "sp21_img20",
+        "category_id": 21
+      },
+      {
+        "image_id": "265",
+        "sample_id": "sp21_img23",
+        "category_id": 21
+      },
+      {
+        "image_id": "266",
+        "sample_id": "sp21_img24",
+        "category_id": 21
+      },
+      {
+        "image_id": "267",
+        "sample_id": "sp21_img25",
+        "category_id": 21
+      },
+      {
+        "image_id": "268",
+        "sample_id": "sp21_img26",
+        "category_id": 21
+      },
+      {
+        "image_id": "270",
+        "sample_id": "sp21_img28",
+        "category_id": 21
+      },
+      {
+        "image_id": "271",
+        "sample_id": "sp21_img29",
+        "category_id": 21
+      },
+      {
+        "image_id": "272",
+        "sample_id": "sp21_img30",
+        "category_id": 21
+      },
+      {
+        "image_id": "273",
+        "sample_id": "sp21_img31",
+        "category_id": 21
+      },
+      {
+        "image_id": "274",
+        "sample_id": "sp21_img32",
+        "category_id": 21
+      },
+      {
+        "image_id": "276",
+        "sample_id": "sp21_img34",
+        "category_id": 21
+      },
+      {
+        "image_id": "277",
+        "sample_id": "sp21_img35",
+        "category_id": 21
+      },
+      {
+        "image_id": "278",
+        "sample_id": "sp21_img36",
+        "category_id": 21
+      },
+      {
+        "image_id": "280",
+        "sample_id": "sp21_img38",
+        "category_id": 21
+      },
+      {
+        "image_id": "281",
+        "sample_id": "sp21_img39",
+        "category_id": 21
+      },
+      {
+        "image_id": "283",
+        "sample_id": "sp21_img41",
+        "category_id": 21
+      },
+      {
+        "image_id": "284",
+        "sample_id": "sp21_img42",
+        "category_id": 21
+      },
+      {
+        "image_id": "285",
+        "sample_id": "sp21_img43",
+        "category_id": 21
+      },
+      {
+        "image_id": "286",
+        "sample_id": "sp21_img44",
+        "category_id": 21
+      },
+      {
+        "image_id": "287",
+        "sample_id": "sp21_img45",
+        "category_id": 21
+      },
+      {
+        "image_id": "290",
+        "sample_id": "sp21_img48",
+        "category_id": 21
+      },
+      {
+        "image_id": "291",
+        "sample_id": "sp21_img49",
+        "category_id": 21
+      },
+      {
+        "image_id": "292",
+        "sample_id": "sp21_img50",
+        "category_id": 21
+      },
+      {
+        "image_id": "293",
+        "sample_id": "sp21_img51",
+        "category_id": 21
+      },
+      {
+        "image_id": "295",
+        "sample_id": "sp22_img01",
+        "category_id": 22
+      },
+      {
+        "image_id": "296",
+        "sample_id": "sp22_img02",
+        "category_id": 22
+      },
+      {
+        "image_id": "298",
+        "sample_id": "sp22_img04",
+        "category_id": 22
+      },
+      {
+        "image_id": "299",
+        "sample_id": "sp22_img05",
+        "category_id": 22
+      },
+      {
+        "image_id": "300",
+        "sample_id": "sp22_img06",
+        "category_id": 22
+      },
+      {
+        "image_id": "301",
+        "sample_id": "sp22_img07",
+        "category_id": 22
+      },
+      {
+        "image_id": "302",
+        "sample_id": "sp22_img08",
+        "category_id": 22
+      },
+      {
+        "image_id": "303",
+        "sample_id": "sp22_img09",
+        "category_id": 22
+      },
+      {
+        "image_id": "304",
+        "sample_id": "sp22_img10",
+        "category_id": 22
+      },
+      {
+        "image_id": "305",
+        "sample_id": "sp22_img11",
+        "category_id": 22
+      },
+      {
+        "image_id": "307",
+        "sample_id": "sp22_img13",
+        "category_id": 22
+      },
+      {
+        "image_id": "310",
+        "sample_id": "sp22_img16",
+        "category_id": 22
+      },
+      {
+        "image_id": "311",
+        "sample_id": "sp22_img17",
+        "category_id": 22
+      },
+      {
+        "image_id": "312",
+        "sample_id": "sp22_img18",
+        "category_id": 22
+      },
+      {
+        "image_id": "314",
+        "sample_id": "sp22_img20",
+        "category_id": 22
+      },
+      {
+        "image_id": "316",
+        "sample_id": "sp22_img22",
+        "category_id": 22
+      },
+      {
+        "image_id": "317",
+        "sample_id": "sp22_img23",
+        "category_id": 22
+      },
+      {
+        "image_id": "319",
+        "sample_id": "sp23_img01",
+        "category_id": 23
+      },
+      {
+        "image_id": "320",
+        "sample_id": "sp23_img02",
+        "category_id": 23
+      },
+      {
+        "image_id": "322",
+        "sample_id": "sp23_img04",
+        "category_id": 23
+      },
+      {
+        "image_id": "323",
+        "sample_id": "sp23_img05",
+        "category_id": 23
+      },
+      {
+        "image_id": "324",
+        "sample_id": "sp23_img06",
+        "category_id": 23
+      },
+      {
+        "image_id": "325",
+        "sample_id": "sp23_img07",
+        "category_id": 23
+      },
+      {
+        "image_id": "328",
+        "sample_id": "sp23_img10",
+        "category_id": 23
+      },
+      {
+        "image_id": "329",
+        "sample_id": "sp23_img11",
+        "category_id": 23
+      },
+      {
+        "image_id": "331",
+        "sample_id": "sp23_img13",
+        "category_id": 23
+      },
+      {
+        "image_id": "332",
+        "sample_id": "sp23_img14",
+        "category_id": 23
+      },
+      {
+        "image_id": "335",
+        "sample_id": "sp23_img17",
+        "category_id": 23
+      },
+      {
+        "image_id": "336",
+        "sample_id": "sp23_img18",
+        "category_id": 23
+      },
+      {
+        "image_id": "337",
+        "sample_id": "sp23_img19",
+        "category_id": 23
+      },
+      {
+        "image_id": "338",
+        "sample_id": "sp23_img20",
+        "category_id": 23
+      },
+      {
+        "image_id": "339",
+        "sample_id": "sp23_img21",
+        "category_id": 23
+      },
+      {
+        "image_id": "341",
+        "sample_id": "sp23_img23",
+        "category_id": 23
+      },
+      {
+        "image_id": "342",
+        "sample_id": "sp24_img01",
+        "category_id": 24
+      },
+      {
+        "image_id": "344",
+        "sample_id": "sp24_img03",
+        "category_id": 24
+      },
+      {
+        "image_id": "345",
+        "sample_id": "sp24_img04",
+        "category_id": 24
+      },
+      {
+        "image_id": "346",
+        "sample_id": "sp24_img05",
+        "category_id": 24
+      },
+      {
+        "image_id": "347",
+        "sample_id": "sp24_img06",
+        "category_id": 24
+      },
+      {
+        "image_id": "349",
+        "sample_id": "sp24_img08",
+        "category_id": 24
+      },
+      {
+        "image_id": "350",
+        "sample_id": "sp24_img09",
+        "category_id": 24
+      },
+      {
+        "image_id": "351",
+        "sample_id": "sp24_img10",
+        "category_id": 24
+      },
+      {
+        "image_id": "354",
+        "sample_id": "sp24_img13",
+        "category_id": 24
+      },
+      {
+        "image_id": "355",
+        "sample_id": "sp24_img14",
+        "category_id": 24
+      },
+      {
+        "image_id": "357",
+        "sample_id": "sp24_img16",
+        "category_id": 24
+      },
+      {
+        "image_id": "358",
+        "sample_id": "sp09_img01",
+        "category_id": 9
+      },
+      {
+        "image_id": "359",
+        "sample_id": "sp09_img02",
+        "category_id": 9
+      },
+      {
+        "image_id": "362",
+        "sample_id": "sp09_img05",
+        "category_id": 9
+      },
+      {
+        "image_id": "363",
+        "sample_id": "sp09_img06",
+        "category_id": 9
+      },
+      {
+        "image_id": "364",
+        "sample_id": "sp09_img07",
+        "category_id": 9
+      },
+      {
+        "image_id": "365",
+        "sample_id": "sp09_img08",
+        "category_id": 9
+      },
+      {
+        "image_id": "366",
+        "sample_id": "sp09_img09",
+        "category_id": 9
+      },
+      {
+        "image_id": "369",
+        "sample_id": "sp09_img12",
+        "category_id": 9
+      }
+    ],
+    "val": [
+      {
+        "image_id": "2",
+        "sample_id": "sp01_img02",
+        "category_id": 1
+      },
+      {
+        "image_id": "8",
+        "sample_id": "sp01_img08",
+        "category_id": 1
+      },
+      {
+        "image_id": "16",
+        "sample_id": "sp02_img04",
+        "category_id": 2
+      },
+      {
+        "image_id": "20",
+        "sample_id": "sp02_img08",
+        "category_id": 2
+      },
+      {
+        "image_id": "31",
+        "sample_id": "sp03_img09",
+        "category_id": 3
+      },
+      {
+        "image_id": "32",
+        "sample_id": "sp03_img10",
+        "category_id": 3
+      },
+      {
+        "image_id": "35",
+        "sample_id": "sp04_img01",
+        "category_id": 4
+      },
+      {
+        "image_id": "42",
+        "sample_id": "sp05_img02",
+        "category_id": 5
+      },
+      {
+        "image_id": "45",
+        "sample_id": "sp05_img05",
+        "category_id": 5
+      },
+      {
+        "image_id": "56",
+        "sample_id": "sp05_img16",
+        "category_id": 5
+      },
+      {
+        "image_id": "63",
+        "sample_id": "sp06_img05",
+        "category_id": 6
+      },
+      {
+        "image_id": "69",
+        "sample_id": "sp06_img11",
+        "category_id": 6
+      },
+      {
+        "image_id": "71",
+        "sample_id": "sp06_img13",
+        "category_id": 6
+      },
+      {
+        "image_id": "76",
+        "sample_id": "sp06_img18",
+        "category_id": 6
+      },
+      {
+        "image_id": "82",
+        "sample_id": "sp06_img24",
+        "category_id": 6
+      },
+      {
+        "image_id": "100",
+        "sample_id": "sp07_img07",
+        "category_id": 7
+      },
+      {
+        "image_id": "102",
+        "sample_id": "sp07_img09",
+        "category_id": 7
+      },
+      {
+        "image_id": "109",
+        "sample_id": "sp08_img04",
+        "category_id": 8
+      },
+      {
+        "image_id": "117",
+        "sample_id": "sp08_img12",
+        "category_id": 8
+      },
+      {
+        "image_id": "127",
+        "sample_id": "sp10_img10",
+        "category_id": 10
+      },
+      {
+        "image_id": "129",
+        "sample_id": "sp10_img12",
+        "category_id": 10
+      },
+      {
+        "image_id": "135",
+        "sample_id": "sp10_img18",
+        "category_id": 10
+      },
+      {
+        "image_id": "143",
+        "sample_id": "sp11_img05",
+        "category_id": 11
+      },
+      {
+        "image_id": "151",
+        "sample_id": "sp12_img08",
+        "category_id": 12
+      },
+      {
+        "image_id": "152",
+        "sample_id": "sp12_img09",
+        "category_id": 12
+      },
+      {
+        "image_id": "158",
+        "sample_id": "sp13_img06",
+        "category_id": 13
+      },
+      {
+        "image_id": "160",
+        "sample_id": "sp14_img02",
+        "category_id": 14
+      },
+      {
+        "image_id": "164",
+        "sample_id": "sp14_img06",
+        "category_id": 14
+      },
+      {
+        "image_id": "175",
+        "sample_id": "sp14_img17",
+        "category_id": 14
+      },
+      {
+        "image_id": "181",
+        "sample_id": "sp15_img05",
+        "category_id": 15
+      },
+      {
+        "image_id": "182",
+        "sample_id": "sp15_img06",
+        "category_id": 15
+      },
+      {
+        "image_id": "186",
+        "sample_id": "sp16_img01",
+        "category_id": 16
+      },
+      {
+        "image_id": "187",
+        "sample_id": "sp16_img02",
+        "category_id": 16
+      },
+      {
+        "image_id": "198",
+        "sample_id": "sp16_img13",
+        "category_id": 16
+      },
+      {
+        "image_id": "204",
+        "sample_id": "sp17_img03",
+        "category_id": 17
+      },
+      {
+        "image_id": "209",
+        "sample_id": "sp18_img05",
+        "category_id": 18
+      },
+      {
+        "image_id": "214",
+        "sample_id": "sp18_img10",
+        "category_id": 18
+      },
+      {
+        "image_id": "227",
+        "sample_id": "sp19_img11",
+        "category_id": 19
+      },
+      {
+        "image_id": "229",
+        "sample_id": "sp19_img13",
+        "category_id": 19
+      },
+      {
+        "image_id": "231",
+        "sample_id": "sp19_img15",
+        "category_id": 19
+      },
+      {
+        "image_id": "235",
+        "sample_id": "sp19_img19",
+        "category_id": 19
+      },
+      {
+        "image_id": "245",
+        "sample_id": "sp20_img05",
+        "category_id": 20
+      },
+      {
+        "image_id": "247",
+        "sample_id": "sp21_img01",
+        "category_id": 21
+      },
+      {
+        "image_id": "251",
+        "sample_id": "sp21_img06",
+        "category_id": 21
+      },
+      {
+        "image_id": "252",
+        "sample_id": "sp21_img07",
+        "category_id": 21
+      },
+      {
+        "image_id": "279",
+        "sample_id": "sp21_img37",
+        "category_id": 21
+      },
+      {
+        "image_id": "282",
+        "sample_id": "sp21_img40",
+        "category_id": 21
+      },
+      {
+        "image_id": "289",
+        "sample_id": "sp21_img47",
+        "category_id": 21
+      },
+      {
+        "image_id": "294",
+        "sample_id": "sp21_img52",
+        "category_id": 21
+      },
+      {
+        "image_id": "297",
+        "sample_id": "sp22_img03",
+        "category_id": 22
+      },
+      {
+        "image_id": "308",
+        "sample_id": "sp22_img14",
+        "category_id": 22
+      },
+      {
+        "image_id": "309",
+        "sample_id": "sp22_img15",
+        "category_id": 22
+      },
+      {
+        "image_id": "313",
+        "sample_id": "sp22_img19",
+        "category_id": 22
+      },
+      {
+        "image_id": "321",
+        "sample_id": "sp23_img03",
+        "category_id": 23
+      },
+      {
+        "image_id": "327",
+        "sample_id": "sp23_img09",
+        "category_id": 23
+      },
+      {
+        "image_id": "330",
+        "sample_id": "sp23_img12",
+        "category_id": 23
+      },
+      {
+        "image_id": "333",
+        "sample_id": "sp23_img15",
+        "category_id": 23
+      },
+      {
+        "image_id": "348",
+        "sample_id": "sp24_img07",
+        "category_id": 24
+      },
+      {
+        "image_id": "353",
+        "sample_id": "sp24_img12",
+        "category_id": 24
+      },
+      {
+        "image_id": "356",
+        "sample_id": "sp24_img15",
+        "category_id": 24
+      },
+      {
+        "image_id": "360",
+        "sample_id": "sp09_img03",
+        "category_id": 9
+      },
+      {
+        "image_id": "368",
+        "sample_id": "sp09_img11",
+        "category_id": 9
+      }
+    ],
+    "test": [
+      {
+        "image_id": "6",
+        "sample_id": "sp01_img06",
+        "category_id": 1
+      },
+      {
+        "image_id": "10",
+        "sample_id": "sp01_img10",
+        "category_id": 1
+      },
+      {
+        "image_id": "14",
+        "sample_id": "sp02_img02",
+        "category_id": 2
+      },
+      {
+        "image_id": "26",
+        "sample_id": "sp03_img04",
+        "category_id": 3
+      },
+      {
+        "image_id": "34",
+        "sample_id": "sp03_img12",
+        "category_id": 3
+      },
+      {
+        "image_id": "36",
+        "sample_id": "sp04_img02",
+        "category_id": 4
+      },
+      {
+        "image_id": "46",
+        "sample_id": "sp05_img06",
+        "category_id": 5
+      },
+      {
+        "image_id": "50",
+        "sample_id": "sp05_img10",
+        "category_id": 5
+      },
+      {
+        "image_id": "58",
+        "sample_id": "sp05_img18",
+        "category_id": 5
+      },
+      {
+        "image_id": "61",
+        "sample_id": "sp06_img03",
+        "category_id": 6
+      },
+      {
+        "image_id": "62",
+        "sample_id": "sp06_img04",
+        "category_id": 6
+      },
+      {
+        "image_id": "74",
+        "sample_id": "sp06_img16",
+        "category_id": 6
+      },
+      {
+        "image_id": "81",
+        "sample_id": "sp06_img23",
+        "category_id": 6
+      },
+      {
+        "image_id": "91",
+        "sample_id": "sp06_img33",
+        "category_id": 6
+      },
+      {
+        "image_id": "101",
+        "sample_id": "sp07_img08",
+        "category_id": 7
+      },
+      {
+        "image_id": "104",
+        "sample_id": "sp07_img11",
+        "category_id": 7
+      },
+      {
+        "image_id": "110",
+        "sample_id": "sp08_img05",
+        "category_id": 8
+      },
+      {
+        "image_id": "116",
+        "sample_id": "sp08_img11",
+        "category_id": 8
+      },
+      {
+        "image_id": "118",
+        "sample_id": "sp10_img01",
+        "category_id": 10
+      },
+      {
+        "image_id": "121",
+        "sample_id": "sp10_img04",
+        "category_id": 10
+      },
+      {
+        "image_id": "132",
+        "sample_id": "sp10_img15",
+        "category_id": 10
+      },
+      {
+        "image_id": "140",
+        "sample_id": "sp11_img02",
+        "category_id": 11
+      },
+      {
+        "image_id": "144",
+        "sample_id": "sp12_img01",
+        "category_id": 12
+      },
+      {
+        "image_id": "156",
+        "sample_id": "sp13_img04",
+        "category_id": 13
+      },
+      {
+        "image_id": "161",
+        "sample_id": "sp14_img03",
+        "category_id": 14
+      },
+      {
+        "image_id": "162",
+        "sample_id": "sp14_img04",
+        "category_id": 14
+      },
+      {
+        "image_id": "168",
+        "sample_id": "sp14_img10",
+        "category_id": 14
+      },
+      {
+        "image_id": "178",
+        "sample_id": "sp15_img02",
+        "category_id": 15
+      },
+      {
+        "image_id": "191",
+        "sample_id": "sp16_img06",
+        "category_id": 16
+      },
+      {
+        "image_id": "192",
+        "sample_id": "sp16_img07",
+        "category_id": 16
+      },
+      {
+        "image_id": "203",
+        "sample_id": "sp17_img02",
+        "category_id": 17
+      },
+      {
+        "image_id": "210",
+        "sample_id": "sp18_img06",
+        "category_id": 18
+      },
+      {
+        "image_id": "212",
+        "sample_id": "sp18_img08",
+        "category_id": 18
+      },
+      {
+        "image_id": "224",
+        "sample_id": "sp19_img08",
+        "category_id": 19
+      },
+      {
+        "image_id": "230",
+        "sample_id": "sp19_img14",
+        "category_id": 19
+      },
+      {
+        "image_id": "236",
+        "sample_id": "sp19_img20",
+        "category_id": 19
+      },
+      {
+        "image_id": "243",
+        "sample_id": "sp20_img03",
+        "category_id": 20
+      },
+      {
+        "image_id": "249",
+        "sample_id": "sp21_img04",
+        "category_id": 21
+      },
+      {
+        "image_id": "257",
+        "sample_id": "sp21_img13",
+        "category_id": 21
+      },
+      {
+        "image_id": "258",
+        "sample_id": "sp21_img14",
+        "category_id": 21
+      },
+      {
+        "image_id": "264",
+        "sample_id": "sp21_img21",
+        "category_id": 21
+      },
+      {
+        "image_id": "269",
+        "sample_id": "sp21_img27",
+        "category_id": 21
+      },
+      {
+        "image_id": "275",
+        "sample_id": "sp21_img33",
+        "category_id": 21
+      },
+      {
+        "image_id": "288",
+        "sample_id": "sp21_img46",
+        "category_id": 21
+      },
+      {
+        "image_id": "306",
+        "sample_id": "sp22_img12",
+        "category_id": 22
+      },
+      {
+        "image_id": "315",
+        "sample_id": "sp22_img21",
+        "category_id": 22
+      },
+      {
+        "image_id": "318",
+        "sample_id": "sp22_img24",
+        "category_id": 22
+      },
+      {
+        "image_id": "326",
+        "sample_id": "sp23_img08",
+        "category_id": 23
+      },
+      {
+        "image_id": "334",
+        "sample_id": "sp23_img16",
+        "category_id": 23
+      },
+      {
+        "image_id": "340",
+        "sample_id": "sp23_img22",
+        "category_id": 23
+      },
+      {
+        "image_id": "343",
+        "sample_id": "sp24_img02",
+        "category_id": 24
+      },
+      {
+        "image_id": "352",
+        "sample_id": "sp24_img11",
+        "category_id": 24
+      },
+      {
+        "image_id": "361",
+        "sample_id": "sp09_img04",
+        "category_id": 9
+      },
+      {
+        "image_id": "367",
+        "sample_id": "sp09_img10",
+        "category_id": 9
+      }
+    ]
+  }
+}

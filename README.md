@@ -390,44 +390,134 @@ train/runs/compare_<timestamp>/
 
 ---
 
-### `train-colony` — пайплайн COCO → MobileNet
+### `train-colony` — обучение из подготовленного COCO snapshot
 
-Одна команда делает весь цикл: готовит split и манифест, обучает MobileNetV3-Small на
-патчах 512×512, выбирает checkpoint по валидации, проверяет паритет ONNX, оценивает
-held-out test и (опционально) замеряет скорость CPU-инференса.
+`prepare-colony-training`, упаковка, получение архива и обучение — отдельные шаги.
+Обучающий pipeline принимает только полный распакованный каталог с `dataset.json`,
+`split.json` и всеми файлами из манифеста; он проверяет данные до baseline/optimizer и
+не создаёт/не перезаписывает изображения, маски или black-background варианты.
+
+#### 1. Подготовить и упаковать (на машине с локальным COCO-источником)
+
+```bash
+# Полное окружение (однократно для этой копии репозитория)
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync prepare-colony-training \
+  --data-root datasets/22022540 \
+  --output datasets/work/22022540-training-webp \
+  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --black-background
+
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync pack-colony-training \
+  --data-root datasets/work/22022540-training-webp \
+  --archive datasets/archives/22022540-training-webp.tar.zst
+```
+
+Подготовка копирует исходные изображения байт-в-байт, а полноразмерные
+black-background варианты записывает в lossless WebP и проверяет точное совпадение
+пикселей. Упаковщик выполняет детерминированный
+Zstandard level 19, полный SHA-256 round-trip и печатает фактический размер/коэффициент
+сжатия. Рядом с архивом он создаёт обычные Git
+sidecar-файлы `22022540-training-webp.dataset.json`, `.split.json`, `.annot_COCO.json` и
+`.archive.json` (метрики и SHA-256 архива). Эти команды не выполняют `git add`, commit
+или push. `datasets/work/` игнорируется Git.
+
+#### 2. Получить и распаковать на новой машине
+
+Сначала установите Git LFS (Fedora: `sudo dnf install git-lfs`; для других ОС см. [официальную инструкцию](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage)) и инициализируйте его. В новом checkout (после того, как архив явно опубликован владельцем):
+
+```bash
+git lfs install
+git clone https://github.com/Egel68/bacterial-colony-area.git training-checkout
+cd training-checkout
+git lfs pull
+git lfs ls-files
+test -s datasets/archives/22022540-training-webp.tar.zst
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync unpack-colony-training \
+  --archive datasets/archives/22022540-training-webp.tar.zst \
+  --output datasets/work/22022540-training-webp
+```
+
+`unpack-colony-training` требует новый/несуществующий `--output`, безопасно распаковывает
+архив, проверяет его SHA-256, sidecar-метаданные и полноту manifest/split. Без Git LFS
+в checkout может находиться только маленький pointer-файл, а не `.tar.zst`; `git lfs pull`
+получает LFS-объект. См. [Git LFS collaboration](https://docs.github.com/en/repositories/working-with-files/managing-large-files/collaboration-with-git-large-file-storage).
+
+#### 3. Обучить из распакованного каталога
 
 ```bash
 UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
-  --data-root ./datasets/22022540 \
-  --output ./train/colony_training \
-  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
-  --epochs 100 --batch-size 8 --patches-per-image 4 \
-  --cpu-benchmark \
-  --promote-model ./models/colony_mobilenet_v3_small_retrained.onnx
+  --data-root datasets/work/22022540-training-webp \
+  --output train/runs/22022540_black_background_seed42_your-new-run \
+  --model unet --black-background --no-pretrained --seed 42 \
+  --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 2 --patches-per-image 4 --img-size 512 \
+  --cpu-benchmark
 ```
+
+`--output` должен быть новым/пустым каталогом и находиться отдельно от snapshot. Для
+варианта без чёрного фона подготовьте данные с `--no-black-background`, укажите модель
+(по умолчанию `mobilenet_v3_small_unet`) и не передавайте `--black-background`. Для
+парного black-background опыта требуется `--model unet`; обучение и обновление весов
+выполняются на CUDA без CPU fallback. Checkpoint выбирается по validation, test остаётся
+held-out; отчёты и `best.onnx` пишутся только в `<output>/runs/...`.
 
 | Флаг | По умолчанию | Назначение |
 |---|---|---|
-| `--data-root` | обязательно | Каталог исходного COCO-датасета |
-| `--output` | обязательно | Корень результата: `<output>/dataset/` и `<output>/runs/` |
-| `--seed` | 42 | Seed разбиения и обучения |
-| `--train-ratio` / `--val-ratio` / `--test-ratio` | 0.70 / 0.15 / 0.15 | Доли split; сумма должна быть 1 |
+| `--data-root` | обязателен | Полный распакованный snapshot (`dataset.json`, `split.json`, images/masks) |
+| `--output` | обязателен | Отдельный корень результатов запуска |
+| `--model` | `mobilenet_v3_small_unet` | `mobilenet_v3_small_unet` или `unet` |
+| `--black-background` | выключен | Использовать подготовленные пары и парную оценку; требует `unet` |
+| `--seed` | 42 | Seed split и обучения |
+| `--train-ratio` / `--val-ratio` / `--test-ratio` | 0.70 / 0.15 / 0.15 | Доли, сумма должна быть 1 и совпадать с `split.json` |
 | `--epochs` | 100 | Максимум эпох |
 | `--batch-size` | 8 | Размер batch |
-| `--patches-per-image` | 4 | Патчей на исходный снимок за эпоху |
-| `--img-size` | 512 | Сейчас поддерживается только 512 |
-| `--no-pretrained` | выключен | Не загружать ImageNet-веса MobileNet |
-| `--resume-run DIR` | — | Продолжить run из `<output>/runs/`; weight-only checkpoint даёт warm-start |
-| `--cpu-benchmark` | выключен | Замерить tiled ONNX-инференс через CPU provider на test-снимках |
-| `--promote-model FILE.onnx` | — | Скопировать полученный ONNX по указанному пути |
-| `--allow-overwrite` | выключен | Разрешить перезапись promoted-модели (legacy `models/colony_seg.onnx` защищён) |
+| `--patches-per-image` | 4 | Число patch-сэмплов на запись |
+| `--img-size` | 512 | Поддерживается только 512 |
+| `--no-pretrained` | выключен | Не использовать ImageNet weights |
+| `--resume-run DIR` | — | Продолжить незавершённый run из `<output>/runs/` (несовместим с `--black-background`) |
+| `--cpu-benchmark` | выключен | Полноразмерный tiled ONNX CPU benchmark |
+| `--promote-model FILE.onnx` | — | Явно скопировать ONNX по отдельному пути |
+| `--allow-overwrite` | выключен | Разрешить перезапись цели promotion |
 
-> `--output` для нового запуска должен быть новым или пустым каталогом, отдельным от
-> COCO-источника. Без `--cpu-benchmark` test-метрики считаются PyTorch-моделью на
-> доступном устройстве, с ним — ONNX на CPU. Обучение выбирает CUDA при наличии,
-> но inference в приложении всегда CPU-only.
->
-> Эквивалентная запись: `python -m train.main train-colony ...`
+Патчи 512×512 и случайные преобразования формируются в памяти. Исходный snapshot
+проверяется до baseline/optimizer и не изменяется. `models/colony_seg.onnx` не
+перезаписывается автоматически; сначала изучите `report.json`/`comparison.json`, затем
+при необходимости вручную выберите отдельный promotion path.
+
+#### Лицензия, квоты и явная публикация
+
+Для `22022540` запись Figshare версии 3 указывает [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+([версия набора и DOI](https://doi.org/10.6084/m9.figshare.22022540.v3)); сохраняйте атрибуцию и
+ссылку на лицензию и перепроверьте условия/идентичность локальной копии перед
+публикацией. По [актуальной справке GitHub LFS](https://docs.github.com/en/billing/concepts/product-billing/git-lfs)
+(проверено 2026-11-08) бесплатные квоты составляют 10 GiB storage и 10 GiB download
+bandwidth для Free/Pro и 250 GiB/250 GiB для Team/Enterprise Cloud; тариф и budgets
+аккаунта могут меняться. Отдельный лимит размера файла — 2/2/4/5 GB соответственно
+([Git LFS file limits](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-git-large-file-storage)).
+Проверьте размер из `.archive.json`, тариф, остаток квоты и видимость репозитория до
+отправки; новые версии LFS-архива целиком занимают storage, скачивание расходует
+bandwidth.
+
+Первоначальную публикацию выполняет только владелец после этих проверок; инструменты
+подготовки и распаковки Git не меняют. Явные команды для проверки/отправки:
+
+```bash
+git lfs install
+git check-attr filter -- datasets/archives/22022540-training-webp.tar.zst
+git add .gitattributes datasets/archives/22022540-training-webp.tar.zst \
+  datasets/archives/22022540-training-webp.*.json
+git lfs status
+git diff --cached --stat
+git commit -m "Add 22022540 training archive"
+git push origin HEAD
+```
+
+`*.tar.zst` отправляется в LFS; `.json` sidecar-файлы остаются обычными Git-файлами.
+Команды `git add`/commit/push приведены как ручная инструкция — здесь они не запускались.
+Для текущих условий и возможных изменений квот используйте [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/git-lfs).
 
 ---
 
@@ -518,7 +608,7 @@ cp -r session/cropped_masks/* test_images/cropped_masks/
 | `ClassicHighSensitivity` | Классический | sensitivity 0.7, отступ 5%, мин. размер 30 px |
 | `ClassicLowSensitivity` | Классический | sensitivity 0.3, отступ 10%, мин. размер 100 px |
 | `ClassicSolidFill` | Классический | sensitivity 0.3, отступ 15%, solid fill |
-| `NN:colony_seg` | ONNX | U-Net, кадр приводится к 512×512, маска растягивается обратно |
+| `NN:colony_seg` | ONNX | U-Net, тайлы 512×512 со шагом 384 px, усреднение вероятностей перекрытий |
 | `NN:colony_mobilenet_v3_small` | ONNX | MobileNetV3-Small, тайлы 512×512 со шагом 384 px, усреднение перекрытий |
 
 Внутреннее расширение и валидация моделей:
@@ -660,8 +750,9 @@ bacterial-colony-area/
   порогом 0.5.
 - **COCO bbox → эллипс — приблизительная разметка** (weak labels), а не точный контур
   колонии.
-- **Масштабы inference разные:** только MobileNet работает в полном разрешении тайлами;
-  обычный ONNX-адаптер уменьшает кадр до размера модели и растягивает маску обратно.
+- **Масштабы inference разные:** встроенные `NN:colony_seg` и MobileNet работают
+  по перекрывающимся тайлам полного разрешения; универсальный ONNX-адаптер
+  уменьшает кадр до размера модели и растягивает маску обратно.
 - **Скорость NN-зависит от CPU и размера снимка.** Модель работает асинхронно в
   фоновом потоке, окно показывает прогресс тайлов.
 - **Кнопка «💾 Сохранить»** в окне анализа сохраняет отображаемый pixmap области

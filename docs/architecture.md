@@ -107,7 +107,7 @@ bacterial-colony-area/
 │   ├── interface.py            BaseDetectionAlgorithm (ABC)
 │   ├── registry.py             @register_algorithm, register_algorithm_instance
 │   ├── classic_algorithms.py   4 классических алгоритма
-│   ├── onnx_algorithm.py       OnnxModelAlgorithm + scan/register bundled
+│   ├── onnx_algorithm.py       OnnxModelAlgorithm + special bundled registration
 │   ├── tiled_onnx_algorithm.py TiledOnnxModelAlgorithm — полное разрешение
 │   ├── metrics.py              compute_segmentation_metrics — 6 метрик
 │   ├── statistics.py           Описательная статистика, Wilcoxon, выбросы
@@ -488,7 +488,7 @@ _all_names() -> list[str]                            # приватный хел
 | `ClassicSolidFill` | `…ClassicSolidFill` | класс |
 | `ClassicLowSensitivity` | `…ClassicLowSensitivity` | класс |
 | `NN:colony_mobilenet_v3_small` | `TiledOnnxModelAlgorithm` | **экземпляр**, авто |
-| `NN:colony_seg` | `OnnxModelAlgorithm` | **экземпляр**, авто |
+| `NN:colony_seg` | `TiledOnnxModelAlgorithm` | **экземпляр**, авто |
 | `NN:<stem>` | `OnnxModelAlgorithm` | экземпляр для любого `models/*.onnx` |
 
 `testing/__init__.py` не вызывает `register_bundled_models()` — только
@@ -824,7 +824,7 @@ evaluations/2026-09-15_19-44-10/
 | Правило | Последствие |
 |---|---|
 | `--algorithms` = `None` → все зарегистрированные | Без `register_bundled_models()` это только 4 классических |
-| `--model` регистрирует `OnnxModelAlgorithm` | Всегда обычный (resize) адаптер, даже для MobileNet-файла |
+| `--model` регистрирует `OnnxModelAlgorithm` | Всегда обычный (resize) адаптер, даже для MobileNet и `colony_seg` |
 | `--sample-limit` отключает загрузку агрегатного кэша в `evaluate` | Прогон на подмножестве не портит кэш полного датасета |
 | `--no-cropped` отключает вариант `cropped` | Ускоряет прогон вдвое на датасетах с обрезками |
 | `--output` в `baseline`/`report` — **путь к JSON/HTML**, а не каталог | В `evaluate` `--output` не используется, отчёт всегда в run-dir |
@@ -1463,11 +1463,10 @@ datasets/22022540/annot_COCO.json
    `NN:*`-алгоритмы там появляются только через `--model`.
 
 3. **`--model` всегда создаёт обычный (resize) адаптер.**
-   `testing/__main__.py::_register_models` не различает модели. Для
-   MobileNet-файла через CLI вы получите `OnnxModelAlgorithm`, который сожмёт
-   кадр до 512×512 и растянет маску обратно, вместо тайлового inference.
-   Автоматический выбор тайлового адаптера работает только в
-   `scan_bundled_models` (то есть для файлов из папки `models/`).
+   `testing/__main__.py::_register_models` не различает модели. Даже файл
+   `colony_seg.onnx`, переданный через CLI, будет сжат до 512×512 и растянут
+   обратно, вместо production-тайлов. Специальная tiled-регистрация работает
+   только в `scan_bundled_models` для bundled-файлов из `models/`.
 
 4. **GUI не показывает площадь в мм².**
    `AnalysisResult.colony_area_mm2` и `px_to_mm2` вычисляются, но в окно

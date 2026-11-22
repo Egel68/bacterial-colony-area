@@ -315,64 +315,124 @@ tensorboard --logdir train/runs/unet_20260204_120000/tensorboard
 `source/` → `images/`. `make_datasets` разбивает записи на train/val по `subset`
 из манифеста или, при его отсутствии, seed-сплитом от `val_split`.
 
-**Задел на будущее (НЕ реализовано):**
+**Статус импортёров и расширений:**
 
-- **Импортёры внешних датасетов.** Планируется подключать внешние данные
-  (COCO / VOC / произвольные пары) через декоратор `@register_importer`: импортёр
-  растризует анотации в `{id}_mask.png`, материализует файлы (`storage="copy"` —
-  самодостаточная папка, либо `reference` — ссылки на местонахождение) и пишет
-  `dataset.json` той же схемы, что и `ManifestAdapter`. Ядро обучения при этом не
-  меняется — контракт уже готов.
+- **COCO 22022540.** `CocoBboxImporter` реализован для текущего источника; отдельная
+  команда `prepare-colony-training` выполняет preflight, материализует маски, split и
+  black-background варианты. Воспроизводимый LFS/training workflow описан в разделе 2.7.
+  Универсальный registry для произвольных COCO/VOC/пользовательских источников не реализован.
 - **Multiclass-маски.** `mask_mode` в манифесте резервирует значение
   `multiclass`. Сейчас конвейер (loss BCE+Dice, бинаризация порогом 0.5)
   поддерживает только `binary` и бросает понятную ошибку при попытке обучать
   multiclass. Точки расширения помечены комментариями в `train/dataset_manifest.py`.
 
-### 2.7. Импорт внешнего датасета 22022540 (COCO-bbox) и готовая модель
+### 2.7. COCO 22022540: подготовленный snapshot и Git LFS
 
-**Первый материализованный импортёр** — `CocoBboxImporter` (`train/dataset_adapters.py`),
-приводит детекционный датасет `datasets/22022540` (369 изображений, 56 865 колоний,
-24 вида, аннотации COCO/TSV/YOLO/VOC) к контракту обучения: растризует боксы во
-**вписанные эллипсы** бинарной маской (255 = колония) и пишет самодостаточную папку
-с `dataset.json` (читается `ManifestAdapter`). Модель определяет **наличие колонии**,
-а не класс бактерии.
+`CocoBboxImporter` (`train/dataset_adapters.py`) растеризует COCO bbox-в разметку
+во вписанные эллипсы (255 = колония); модель сегментирует наличие колонии, а не
+класс бактерии. Для обучения/передачи используйте отдельный материализующий
+этап `prepare-colony-training`, а не запускайте importer внутри `train-colony`.
+Локальная версия источника: 369 размеченных изображений, 56 865 боксов, 24 вида.
+Проверенная подготовка на seed 42: 369 source + 369 black-background вариантов,
+738 парных записей; source split train/val/test = 253/62/54.
+
+**Подготовка и упаковка (полное окружение, никаких Git-изменений):**
 
 ```bash
-# Полный импорт (source-снимки, ~607 МБ, 2–3 мин; без GUI)
-uv run import-22022540 --data-root datasets/22022540 --output <dir> [--crop] [--verify]
-
-# Создание пары "изображение + маска" и проверка читаемости манифестом:
-#   --output/<dir>/source/*.jpg + source/*_mask.png + dataset.json
-#   load_manifest(<dir>) SHALL резолвиться через ManifestAdapter
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync prepare-colony-training \
+  --data-root datasets/22022540 --output datasets/work/22022540-training-webp \
+  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --black-background
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync pack-colony-training \
+  --data-root datasets/work/22022540-training-webp \
+  --archive datasets/archives/22022540-training-webp.tar.zst
 ```
 
-- `--crop` — дополнительно формирует обрезки по чашке (`kind=cropped`, чёрный фон
-  вне круга); при этом `dish={cx,cy,r}` вычисляется авто-поиском (`analysis/colony_detector.py`).
-  Для source-only-импорта авто-поиск чашки пропускается ради скорости.
-- `--verify` — сверка числа масок на снимок с числом боксов из COCO и YOLO/VOC-дублей;
-  предупреждает при расхождении > 5 (в этом датасете форматы согласованы, 0 расхождений).
-- Источник читается только; выход пишется в `--output` (`storage="copy"`).
+`prepare-colony-training` проверяет наличие/декодируемость/размер всех размеченных
+файлов, копирует исходные изображения байт-в-байт и записывает маски с
+полноразмерными black-background вариантами в lossless WebP (с проверкой точных пикселей),
+а также `dataset.json` и `split.json`.
+`pack-colony-training` создаёт детерминированный lossless `.tar.zst` на уровне 19,
+полностью проверяет round-trip SHA-256 и пишет метрики размера/сжатия. Рядом с
+архивом появляются обычные Git sidecar-файлы `.dataset.json`, `.split.json`,
+`.annot_COCO.json`, `.archive.json`. Каталог `datasets/work/` игнорируется.
 
-**Готовая модель** — `models/colony_seg.onnx` (U-Net, обучен на импортированном
-датасете 22022540, бинарная сегментация). Автоматически регистрируется при старте
-как алгоритм `NN:colony_seg` через `register_bundled_models`; сигнатура
-`detect(image)->uint8 mask` (порог 0.5). Базовые метрики на валидации: IoU 0.72,
-Dice 0.83.
+**Получение на новой машине (после явной публикации архива владельцем):**
 
-**Воспроизведение обучения:**
+Для Fedora: `sudo dnf install git-lfs`; для других ОС — [официальная инструкция по установке Git LFS](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage). Затем выполните `git lfs install` для своего пользователя.
+
 ```bash
-# 1) Импорт датасета
-uv run import-22022540 --data-root datasets/22022540 --output /tmp/ds_22022540
-# 2) Обучение (в окружении .venv-full)
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.main train \
-  --model unet --data-root /tmp/ds_22022540 --img-size 512 --epochs 200
-# 3) best.onnx лежит в train/runs/unet_<ts>/checkpoints/best.onnx
-# 4) (опционально) компактный single-file ONNX без внешних данных:
-UV_PROJECT_ENVIRONMENT=.venv-full uv run python -m train.export_single \
-  --checkpoint train/runs/unet_<ts>/checkpoints/best.pt \
-  --output models/colony_seg.onnx --img-size 512
-# 5) Инференс как алгоритм: тест покрыт tests/test_coco_importer.py + OnnxModelAlgorithm
+git lfs install                 # один раз на машине
+git clone https://github.com/Egel68/bacterial-colony-area.git training-checkout
+cd training-checkout
+git lfs pull
+git lfs ls-files
+test -s datasets/archives/22022540-training-webp.tar.zst
+UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync unpack-colony-training \
+  --archive datasets/archives/22022540-training-webp.tar.zst \
+  --output datasets/work/22022540-training-webp
 ```
+
+`unpack-colony-training` распаковывает в новый каталог и проверяет архив, sidecars,
+манифест, split и пары. Без `git lfs pull` в checkout может оставаться только LFS
+pointer; см. [установку Git LFS](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage)
+и [получение больших файлов](https://docs.github.com/en/repositories/working-with-files/managing-large-files/collaboration-with-git-large-file-storage).
+
+**Обучение только из полного локального snapshot (CUDA обязательна для `unet`):**
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync train-colony \
+  --data-root datasets/work/22022540-training-webp \
+  --output train/runs/22022540_black_background_seed42_your-new-run \
+  --model unet --black-background --no-pretrained --seed 42 \
+  --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --epochs 100 --batch-size 2 --patches-per-image 4 --img-size 512
+```
+
+`train-colony` требует `dataset.json`, `split.json` и все пары до baseline/optimizer;
+он не импортирует COCO и не записывает images/masks. `--output` должен быть отдельным
+новым/пустым каталогом. Патчи/случайные аугментации остаются in-memory. Для данных
+без black-background при подготовке укажите `--no-black-background`, а при обучении
+не передавайте `--black-background`. Отчёты/checkpoints пишутся в
+`<output>/runs/unet_<ts>/`; `models/colony_seg.onnx` не меняется автоматически.
+Полное руководство и все флаги CLI: [docs/dataset-training-pipeline.md](docs/dataset-training-pipeline.md).
+
+**Лицензия/квоты/ручная публикация.** Figshare для версии 3 указывает CC BY 4.0
+([DOI 10.6084/m9.figshare.22022540.v3](https://doi.org/10.6084/m9.figshare.22022540.v3));
+сохраняйте атрибуцию Makrai et al. и ссылку на лицензию, локальная сверка хешей с
+Figshare не выполнялась. По [GitHub LFS billing](https://docs.github.com/en/billing/concepts/product-billing/git-lfs)
+(проверено 2026-11-08) квоты Free/Pro — 10 GiB storage и download bandwidth;
+Team/Enterprise Cloud — по 250 GiB. Максимум одного LFS-файла — 2/2/4/5 GB для
+Free/Pro/Team/Enterprise Cloud ([лимиты](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-git-large-file-storage));
+перед отправкой сравните фактический размер из `.archive.json` с тарифом и текущим
+budget. В LFS новые версии архива учитывают полный размер, скачивания расходуют
+bandwidth.
+
+Публикует только владелец после ручной проверки лицензии, размера и видимости репо:
+
+```bash
+git check-attr filter -- datasets/archives/22022540-training-webp.tar.zst
+git add .gitattributes datasets/archives/22022540-training-webp.tar.zst \
+  datasets/archives/22022540-training-webp.*.json
+git lfs status
+git diff --cached --stat
+git commit -m "Add 22022540 training archive"
+git push origin HEAD
+```
+
+`.tar.zst` входит в LFS, sidecars `.json` остаются обычными Git-файлами. Эти
+команды только документированы; подготовка/упаковка не выполняет add/commit/push.
+
+**Текущая production-модель** — `models/colony_seg.onnx`: scratch U-Net, обученная
+на парах 22022540 (seed 42, source split 70/15/15) на CUDA/NVIDIA GeForce RTX 2060
+with Max-Q Design. `NN:colony_seg` использует CPU, тайлы 512×512, stride 384, sigmoid
+для logits, усреднение вероятностей перекрытий, порог 0.5. На paired holdout из 54
+source ID: исходный фон — IoU 0.4812, Dice 0.6497, Precision 0.8340, Recall 0.5322;
+чёрный — IoU 0.4721, Dice 0.6414, Precision 0.8375, Recall 0.5197. Пересечение
+test-ID с историческим baseline train неизвестно (`unknown`). Report:
+`train/runs/22022540_black_background_seed42/runs/unet_20261107_171657_193829/comparison.json`.
 
 ---
 
@@ -444,7 +504,7 @@ bash scripts/build_nuitka.sh
 | `testing/interface.py` | ABC для алгоритмов детекции |
 | `testing/registry.py` | Декоратор `@register_algorithm` + `register_algorithm_instance` |
 | `testing/classic_algorithms.py` | 4 варианта классического алгоритма |
-| `testing/onnx_algorithm.py` | ONNX-адаптер (`OnnxModelAlgorithm`), сканирование встроенных моделей `models/*.onnx` |
+| `testing/onnx_algorithm.py` | ONNX-адаптеры и выбор tiled/resize для bundled-моделей `models/*.onnx` |
 | `testing/dataset.py` | Загрузчик тестовых пар (изображение + GT-маска) |
 | `testing/metrics.py` | IoU, Dice, F1, Precision, Recall |
 | `testing/runner.py` | Прогон алгоритмов и сбор метрик |

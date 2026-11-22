@@ -152,6 +152,12 @@ def _train_colony(args, parser):
         parser.error(
             "Native-resolution patch training currently requires --img-size 512"
         )
+    if args.black_background and args.model != "unet":
+        parser.error("--black-background requires --model unet")
+    if args.black_background and args.resume_run:
+        parser.error(
+            "--black-background requires a fresh run; --resume-run is incompatible"
+        )
 
     from .training_pipeline import run_colony_training
 
@@ -165,6 +171,8 @@ def _train_colony(args, parser):
         patches_per_image=args.patches_per_image,
         img_size=args.img_size,
         pretrained=not args.no_pretrained,
+        model_name=args.model,
+        black_background=args.black_background,
         model_promotion_path=(Path(args.promote_model) if args.promote_model else None),
         allow_overwrite=args.allow_overwrite,
         cpu_benchmark=args.cpu_benchmark,
@@ -218,13 +226,26 @@ def main(argv: Sequence[str] | None = None):
     sub.add_parser("dataset-info", help="Show dataset info")
 
     colony_parser = sub.add_parser(
-        "train-colony", help="Prepare, train and evaluate the compact COCO segmenter"
+        "train-colony", help="Train and evaluate using a prepared COCO dataset"
     )
     colony_parser.add_argument(
-        "--data-root", required=True, help="COCO source directory"
+        "--data-root",
+        required=True,
+        help="Prepared dataset root with dataset.json and split.json",
     )
     colony_parser.add_argument(
-        "--output", required=True, help="Output root for dataset and run"
+        "--model",
+        choices=("mobilenet_v3_small_unet", "unet"),
+        default="mobilenet_v3_small_unet",
+        help="Architecture (default: mobilenet_v3_small_unet)",
+    )
+    colony_parser.add_argument(
+        "--black-background",
+        action="store_true",
+        help="Use prepared black-background variants for paired evaluation (requires --model unet)",
+    )
+    colony_parser.add_argument(
+        "--output", required=True, help="Separate output root for run artifacts"
     )
     colony_parser.add_argument("--seed", type=int, default=42)
     colony_parser.add_argument("--train-ratio", type=float, default=0.70)

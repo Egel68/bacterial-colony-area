@@ -531,7 +531,7 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync python -m train.main train-co
 Хотя parser принимает `--dashboard` у `train-compare`, обработчик этого режима не
 запускает dashboard — используйте его для подкоманды `train`.
 
-### COCO → MobileNet pipeline
+### COCO training pipeline (MobileNet by default)
 
 Одной командой создаётся split и manifest, обучается MobileNetV3-Small на патчах,
 выбирается checkpoint по validation, проверяется ONNX и оценивается held-out test:
@@ -559,6 +559,8 @@ UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync python -m train.main train-co
 |---|---:|---|
 | `--data-root` | обязательно | Каталог исходного COCO-датасета. |
 | `--output` | обязательно | Корень результата с датасетом и runs. |
+| `--model` | `mobilenet_v3_small_unet` | `mobilenet_v3_small_unet` или `unet`; default сохраняет прежнее поведение. |
+| `--black-background` | выключен | Опциональный парный эксперимент; требует `--model unet` и свежий запуск без `--resume-run`. |
 | `--seed` | 42 | Seed разбиения и обучения. |
 | `--train-ratio`, `--val-ratio`, `--test-ratio` | 0.70 / 0.15 / 0.15 | Положительные доли; сумма должна быть 1. |
 | `--epochs` | 100 | Максимум эпох. |
@@ -575,8 +577,37 @@ Run включает checkpoint-ы, `summary.json` и `report.json` с метр�
 сведениями об обучении. `--cpu-benchmark` добавляет замеры CPU full-image
 инференса. Inference в приложении остаётся CPU-only, даже если обучение шло на CUDA.
 
-### Отдельный экспорт checkpoint в ONNX
+### Чёрный фон: scratch-U-Net эксперимент
 
+Для этого режима укажите одновременно `--model unet` и `--black-background`.
+Pipeline создаёт source-level split **до** генерации вариантов; в train попадают
+оригинал и один чёрнофоновый вариант каждого train ID, val выбирает checkpoint,
+а test используется только после обучения. U-Net запускается со случайной
+инициализацией: pretrained-веса не загружаются, `--resume-run` запрещён.
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync python -m train.main train-colony \
+  --data-root datasets/22022540 \
+  --output /tmp/22022540_black_background \
+  --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+  --model unet --black-background \
+  --epochs 100 --batch-size 8 --patches-per-image 4 --img-size 512
+```
+
+В `<output>/dataset/augmented/` записываются полноразмерные PNG-варианты; внутри
+круга чашки пиксели сохранены, вне круга — чёрные. Source-файл не изменяется, а
+вариант наследует его subset и GT-маску. В `<output>/runs/unet_<timestamp>/` находятся
+checkpoint-ы, `report.json`, канонический `comparison.json` и `comparison.html`.
+
+Сравнение включает bundled baseline и scratch U-Net на одинаковых test source ID
+для оригинального и чёрного фона. В матрице `[[TN, FP], [FN, TP]]` строки —
+истинный класс, столбцы — предсказанный. Precision/recall рассчитываются из
+суммарных пиксельных TP/FP/FN, а не усредняются по снимкам; при нулевом
+знаменателе значение равно 0. В отчёте `baseline_training_overlap: "unknown"`
+означает, что исторический список обучающих ID baseline-модели не найден —
+результат baseline нельзя считать доказанно независимой holdout-оценкой.
+
+### Отдельный экспорт checkpoint в ONNX
 ```bash
 UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync python -m train.export_single \
   --checkpoint train/runs/unet_<timestamp>/checkpoints/best.pt \
