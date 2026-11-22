@@ -1,8 +1,6 @@
 """Focused checks for the real COCO training orchestration."""
 
 import json
-from pathlib import Path
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -133,96 +131,112 @@ def test_cpu_benchmark_keeps_one_measurement_after_warmups(tmp_path, monkeypatch
     assert report["median_seconds"] == pytest.approx(4.0)
 
 
-def test_training_pipeline_stops_if_import_changes_read_only_source(
-    tmp_path, monkeypatch
-):
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "annot_COCO.json").write_text("initial", encoding="utf-8")
-
-    def _mutating_import(self, data_root, output_dir, **kwargs):
-        (Path(data_root) / "annot_COCO.json").write_text("mutated", encoding="utf-8")
-
-    monkeypatch.setattr(pipeline.CocoBboxImporter, "build", _mutating_import)
-    monkeypatch.setattr(
-        pipeline,
-        "run_training",
-        lambda *_args, **_kwargs: pytest.fail(
-            "training must not start after source mutation"
-        ),
-    )
-
-    with pytest.raises(RuntimeError, match="(?i)read-only COCO source changed"):
-        pipeline.run_colony_training(
-            data_root=source,
-            output_root=tmp_path / "run",
-            pretrained=False,
-        )
-
-
-def test_training_pipeline_stops_if_source_changes_after_training(
-    tmp_path, monkeypatch
-):
-    source = tmp_path / "source"
-    source.mkdir()
-    marker = source / "annot_COCO.json"
-    marker.write_text("stable", encoding="utf-8")
-    output_root = tmp_path / "run"
-    prepared = output_root / "dataset"
-    prepared.mkdir(parents=True)
-    coco = {
-        "images": [{"id": index, "file_name": f"{index}.png"} for index in (1, 2, 3)],
-        "annotations": [
-            {"image_id": index, "bbox": [0, 0, 1, 1]} for index in (1, 2, 3)
-        ],
-    }
-    marker.write_text(json.dumps(coco), encoding="utf-8")
-    split_groups = {
-        subset: [
+def _make_prepared_snapshot(root):
+    root.mkdir()
+    samples = []
+    groups = {"train": [], "val": [], "test": []}
+    for index, subset in zip((1, 2, 3), ("train", "val", "test"), strict=True):
+        image_name = f"sample-{index}.png"
+        mask_name = f"sample-{index}_mask.png"
+        cv2.imwrite(str(root / image_name), np.zeros((32, 32, 3), np.uint8))
+        cv2.imwrite(str(root / mask_name), np.zeros((32, 32), np.uint8))
+        sample_id = f"sample-{index}"
+        samples.append(
             {
-                "image_id": index,
-                "sample_id": f"sample-{index}",
-                "category_id": 1,
+                "id": sample_id,
+                "kind": "source",
+                "image": image_name,
+                "mask": mask_name,
+                "subset": subset,
             }
-        ]
-        for index, subset in zip((1, 2, 3), ("train", "val", "test"), strict=True)
-    }
-    (prepared / "dataset.json").write_text("{}", encoding="utf-8")
-    (prepared / "split.json").write_text(
+        )
+        groups[subset].append(
+            {"image_id": index, "sample_id": sample_id, "category_id": 1}
+        )
+    (root / "dataset.json").write_text(
         json.dumps(
             {
-                "seed": 42,
-                "ratios": {"train": 0.7, "val": 0.15, "test": 0.15},
-                "groups": split_groups,
+                "name": "prepared-test",
+                "origin": "external",
+                "mask_mode": "binary",
+                "storage": "copy",
+                "samples": samples,
             }
         ),
         encoding="utf-8",
     )
+    (root / "split.json").write_text(
+        json.dumps(
+            {
+                "strategy": "stratified_source_image_id",
+                "seed": 42,
+                "ratios": {"train": 0.7, "val": 0.15, "test": 0.15},
+                "groups": groups,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_training_rejects_incomplete_prepared_dataset_before_work(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    from train.dataset_adapters import CocoBboxImporter
+
+    fake_torch = ModuleType("torch")
+    fake_torch.cuda = SimpleNamespace(is_available=lambda: True)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    prepared = tmp_path / "prepared"
+    prepared.mkdir()
+    (prepared / "dataset.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "run_training",
+        lambda *_args, **_kwargs: pytest.fail("optimizer must not start on incomplete data"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "evaluate_paired_model",
+        lambda *_args, **_kwargs: pytest.fail("baseline must not run on incomplete data"),
+    )
+    output = tmp_path / "run"
+
+    with pytest.raises(FileNotFoundError, match="split.json"):
+        pipeline.run_colony_training(
+            data_root=prepared,
+            output_root=output,
+            model_name="unet",
+            black_background=True,
+            pretrained=False,
+        )
+    assert not output.exists()
+
+
+def test_training_stops_if_prepared_dataset_changes_during_training(
+    tmp_path, monkeypatch
+):
+    from train.dataset_adapters import CocoBboxImporter
+
+    prepared = _make_prepared_snapshot(tmp_path / "prepared")
+    output_root = tmp_path / "run"
     resume_run = output_root / "runs" / "partial"
     checkpoint = resume_run / "checkpoints" / "last.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"checkpoint")
 
-    signatures = iter(("stable", "stable", "changed-during-training"))
+    signatures = iter(("stable", "changed-during-training"))
     monkeypatch.setattr(pipeline, "_tree_signature", lambda _root: next(signatures))
-    monkeypatch.setattr(pipeline.CocoBboxImporter, "build", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        pipeline,
-        "load_manifest",
-        lambda _root: SimpleNamespace(
-            samples=[
-                SimpleNamespace(
-                    id=f"sample-{index}",
-                    subset=subset,
-                    kind="source",
-                    image=f"sample-{index}.png",
-                    mask=f"sample-{index}_mask.png",
-                )
-                for index, subset in zip(
-                    (1, 2, 3), ("train", "val", "test"), strict=True
-                )
-            ]
-        ),
+        CocoBboxImporter,
+        "build",
+        lambda *_args, **_kwargs: pytest.fail("training must not prepare COCO data"),
     )
     monkeypatch.setattr(
         pipeline,
@@ -230,9 +244,9 @@ def test_training_pipeline_stops_if_source_changes_after_training(
         lambda _cfg: ({"best_epoch": 1}, [], [], resume_run),
     )
 
-    with pytest.raises(RuntimeError, match="changed before checkpoint evaluation"):
+    with pytest.raises(RuntimeError, match="Prepared dataset changed during training"):
         pipeline.run_colony_training(
-            data_root=source,
+            data_root=prepared,
             output_root=output_root,
             pretrained=False,
             resume_run=resume_run,

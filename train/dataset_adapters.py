@@ -13,6 +13,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+import shutil
 from typing import Optional
 
 import cv2
@@ -29,6 +30,69 @@ from .dataset_manifest import (
 from .dataset_split import DEFAULT_SPLIT_RATIOS, stratified_group_split
 
 SUPPORTED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+
+
+def validate_coco_inputs(data_root: Path) -> dict[str, int]:
+    """Проверить размеченные COCO-изображения до создания результата."""
+    import json
+
+    source = Path(data_root)
+    if not source.is_dir():
+        raise NotADirectoryError(f"COCO source directory does not exist: {source}")
+    coco_path = source / "annot_COCO.json"
+    if not coco_path.is_file():
+        raise FileNotFoundError(f"annot_COCO.json not found in {source}")
+
+    coco = json.loads(coco_path.read_text(encoding="utf-8"))
+    images_by_id = {}
+    for image_meta in coco.get("images", []):
+        image_id = image_meta.get("id")
+        if image_id in images_by_id:
+            raise ValueError(f"Duplicate COCO image id: {image_id}")
+        images_by_id[image_id] = image_meta
+
+    annotations = coco.get("annotations", [])
+    annotated_ids = {annotation.get("image_id") for annotation in annotations}
+    if None in annotated_ids or not annotated_ids:
+        raise ValueError("COCO annotations must reference at least one image")
+
+    for image_id in sorted(annotated_ids, key=str):
+        image_meta = images_by_id.get(image_id)
+        if image_meta is None:
+            raise ValueError(f"COCO annotation references unknown image id: {image_id}")
+        filename = image_meta.get("file_name")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError(f"COCO image {image_id} has an invalid file_name")
+        relative_path = Path(filename)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(
+                f"COCO image {image_id} has an unsafe file_name: {filename}"
+            )
+        image_path = source / relative_path
+        if not image_path.is_file():
+            raise FileNotFoundError(
+                f"Source image referenced by COCO is missing: {image_path}"
+            )
+        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError(f"Could not decode COCO source image: {image_path}")
+
+        try:
+            expected_width = int(image_meta["width"])
+            expected_height = int(image_meta["height"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"COCO image {image_id} has invalid width/height metadata"
+            ) from error
+        actual_height, actual_width = image.shape[:2]
+        if (actual_width, actual_height) != (expected_width, expected_height):
+            raise ValueError(
+                f"COCO source image dimensions differ for {image_path}: "
+                f"metadata={expected_width}x{expected_height}, "
+                f"actual={actual_width}x{actual_height}"
+            )
+
+    return {"annotated_images": len(annotated_ids), "annotations": len(annotations)}
 
 
 class BaseAdapter(ABC):
@@ -266,7 +330,8 @@ class CocoBboxImporter(BaseAdapter):
                 raise ValueError(
                     "Split import output must be disjoint from the read-only source"
                 )
-        out.mkdir(parents=True, exist_ok=True)
+        if split:
+            validate_coco_inputs(source)
 
         raw = json.loads(coco_path.read_text(encoding="utf-8"))
 
@@ -298,6 +363,8 @@ class CocoBboxImporter(BaseAdapter):
         else:
             assignments = {}
 
+        # Создавать каталог результата только после проверки входа и параметров split.
+        out.mkdir(parents=True, exist_ok=True)
         samples: list[SampleRecord] = []
         source_records: list[SampleRecord] = []
         processed = 0
@@ -333,7 +400,7 @@ class CocoBboxImporter(BaseAdapter):
             if black_background:
                 dish = self._require_dish_geometry(dish, image.shape, sample_id)
 
-            rel_img, rel_mask = self._write_source(out, filename, image, mask)
+            rel_img, rel_mask = self._write_source(out, filename, src_img, mask)
             source_record = SampleRecord(
                 id=sample_id,
                 kind=SampleKind.SOURCE.value,
@@ -506,26 +573,33 @@ class CocoBboxImporter(BaseAdapter):
         directory = out / SampleKind.AUGMENTED.value
         directory.mkdir(parents=True, exist_ok=True)
         rel_image = (
-            Path(SampleKind.AUGMENTED.value) / f"{sample_id}_black_background.png"
+            Path(SampleKind.AUGMENTED.value) / f"{sample_id}_black_background.webp"
         )
-        if not cv2.imwrite(str(out / rel_image), image):
-            raise OSError(f"Could not write black-background variant for '{sample_id}'")
+        webp_quality = getattr(cv2, "IMWRITE_WEBP_QUALITY", None)
+        if webp_quality is None or not cv2.imwrite(
+            str(out / rel_image), image, [webp_quality, 101]
+        ):
+            raise OSError(f"Could not write lossless WebP variant for '{sample_id}'")
+        roundtrip = cv2.imread(str(out / rel_image), cv2.IMREAD_COLOR)
+        if roundtrip is None or not np.array_equal(roundtrip, image):
+            raise OSError(f"Lossless WebP round-trip failed for '{sample_id}'")
         return rel_image
 
     def _write_source(
         self,
         out: Path,
         filename: str,
-        image: np.ndarray,
+        source_image: Path,
         mask: np.ndarray,
     ) -> tuple[Path, Path]:
-        """Запись полноразмерной пары изображение+маска в `out/source/`."""
-        (out / SampleKind.SOURCE.value).mkdir(exist_ok=True)
+        """Скопировать исходные байты изображения и записать бинарную маску."""
+        (out / SampleKind.SOURCE.value).mkdir(parents=True, exist_ok=True)
         stem = Path(filename).stem
         rel_img = Path(SampleKind.SOURCE.value) / f"{stem}{Path(filename).suffix}"
         rel_mask = Path(SampleKind.SOURCE.value) / f"{stem}_mask.png"
-        cv2.imwrite(str(out / rel_img), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        cv2.imwrite(str(out / rel_mask), mask)
+        shutil.copyfile(source_image, out / rel_img)
+        if not cv2.imwrite(str(out / rel_mask), mask):
+            raise OSError(f"Could not write mask for source image '{filename}'")
         return rel_img, rel_mask
 
     def _write_cropped(

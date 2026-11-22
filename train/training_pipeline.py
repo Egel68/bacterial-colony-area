@@ -21,7 +21,8 @@ from .background_experiment import (
     write_comparison_html,
 )
 from .config import TrainingConfig
-from .dataset_adapters import CocoBboxImporter, load_manifest
+from .dataset_adapters import load_manifest
+from .dataset_distribution import validate_prepared_dataset
 from .evaluation import (
     build_training_report,
     compute_binary_metrics,
@@ -240,7 +241,6 @@ def run_colony_training(
     allow_overwrite: bool = False,
     cpu_benchmark: bool = False,
     resume_run: Path | None = None,
-    reuse_prepared_dataset: bool = False,
     model_name: str = "mobilenet_v3_small_unet",
     black_background: bool = False,
 ) -> dict[str, object]:
@@ -252,12 +252,6 @@ def run_colony_training(
         raise ValueError(
             "Black-background experiment must start from random initialization"
         )
-    if reuse_prepared_dataset and not black_background:
-        raise ValueError(
-            "Prepared-dataset reuse is only supported for black-background runs"
-        )
-    if reuse_prepared_dataset and resume_run is not None:
-        raise ValueError("Cannot combine prepared-dataset reuse with --resume-run")
     if black_background:
         try:
             import torch
@@ -270,41 +264,29 @@ def run_colony_training(
                 "This experiment requires a CUDA GPU; CPU fallback is disabled."
             )
 
-    data_root = Path(data_root)
+    data_root = Path(data_root).resolve()
     output_root = Path(output_root)
-    source_resolved = data_root.resolve()
+    source_resolved = data_root
     output_resolved = output_root.resolve()
     if (
         source_resolved == output_resolved
         or source_resolved in output_resolved.parents
         or output_resolved in source_resolved.parents
     ):
-        raise ValueError("Output root must be disjoint from the read-only COCO source")
+        raise ValueError("Output root must be disjoint from the prepared dataset")
     resume_run = Path(resume_run).resolve() if resume_run is not None else None
-    dataset_root = output_root / "dataset"
-    if output_root.exists() and any(output_root.iterdir()) and resume_run is None:
-        existing_entries = {entry.name for entry in output_root.iterdir()}
-        reusable_only = reuse_prepared_dataset and existing_entries == {"dataset"}
-        if not reusable_only:
-            raise FileExistsError(
-                f"Refusing to use non-empty output directory: {output_root}; choose a new path"
-            )
-    if reuse_prepared_dataset and not (
-        (dataset_root / "dataset.json").is_file()
-        and (dataset_root / "split.json").is_file()
-    ):
-        raise FileNotFoundError(
-            f"Prepared dataset reuse requires dataset.json and split.json in {dataset_root}"
+    dataset_root = data_root
+    if output_root.exists() and (
+        not output_root.is_dir() or any(output_root.iterdir())
+    ) and resume_run is None:
+        raise FileExistsError(
+            f"Refusing to use non-empty output directory: {output_root}; choose a new path"
         )
     if resume_run is not None:
         runs_root = (output_root / "runs").resolve()
         if runs_root not in resume_run.parents:
             raise ValueError("Resume run must be a child of <output>/runs")
         _resume_checkpoint(resume_run)
-        if not (dataset_root / "dataset.json").is_file():
-            raise FileNotFoundError(f"No prepared dataset found at {dataset_root}")
-        if not (dataset_root / "split.json").is_file():
-            raise FileNotFoundError(f"No persisted split found at {dataset_root}")
     if model_promotion_path is not None:
         model_promotion_path = Path(model_promotion_path)
         promotion_resolved = model_promotion_path.resolve()
@@ -313,7 +295,7 @@ def run_colony_training(
             or source_resolved in promotion_resolved.parents
         ):
             raise ValueError(
-                "Promoted model path must not be inside the read-only COCO source"
+                "Promoted model path must not be inside the read-only prepared dataset"
             )
         if model_promotion_path.exists() and not allow_overwrite:
             raise FileExistsError(
@@ -340,58 +322,28 @@ def run_colony_training(
             f"Bundled baseline model not found: {baseline_model_path}"
         )
     baseline_evaluation = None
-    source_signature = _tree_signature(data_root)
-
-    if resume_run is None and not reuse_prepared_dataset:
-        CocoBboxImporter().build(
-            data_root=data_root,
-            output_dir=dataset_root,
-            split=True,
-            seed=seed,
-            split_ratios=ratios,
-            black_background=black_background,
-        )
-    elif (
-        not (dataset_root / "dataset.json").is_file()
-        or not (dataset_root / "split.json").is_file()
+    manifest, split = validate_prepared_dataset(
+        dataset_root, require_black_background=black_background
+    )
+    if not black_background and any(
+        record.kind == "augmented" and record.id.endswith("__black_background")
+        for record in manifest.samples
     ):
-        raise FileNotFoundError(f"No complete prepared dataset found at {dataset_root}")
-
-    source_signature_after_import = _tree_signature(data_root)
-    if source_signature_after_import != source_signature:
-        raise RuntimeError(
-            "Read-only COCO source changed during dataset preparation; "
-            "training was stopped"
+        raise ValueError(
+            "Prepared dataset includes black-background variants; pass --black-background"
         )
-    split = json.loads((dataset_root / "split.json").read_text(encoding="utf-8"))
     expected_ratios = dict(zip(("train", "val", "test"), ratios, strict=True))
-    if split.get("seed") != seed or split.get("ratios") != expected_ratios:
-        raise ValueError("Existing split seed/ratios do not match run arguments")
-    coco = json.loads((data_root / "annot_COCO.json").read_text(encoding="utf-8"))
-    annotated_ids = {
-        str(annotation["image_id"]) for annotation in coco.get("annotations", [])
-    }
-    split_groups = split.get("groups", {})
-    split_ids = {
-        str(group["image_id"]) for groups in split_groups.values() for group in groups
-    }
-    if split_ids != annotated_ids:
-        raise ValueError("Persisted split does not account for current COCO image IDs")
+    if split["seed"] != seed or split["ratios"] != expected_ratios:
+        raise ValueError("Prepared split seed/ratios do not match run arguments")
     assignments = {
-        str(group["sample_id"]): subset
-        for subset, groups in split_groups.items()
+        group["sample_id"]: subset
+        for subset, groups in split["groups"].items()
         for group in groups
     }
-    if len(assignments) != len(split_ids):
-        raise ValueError("Persisted split contains duplicate source sample IDs")
-
-    manifest = load_manifest(dataset_root)
     source_records = [record for record in manifest.samples if record.kind == "source"]
     actual_assignments = {record.id: record.subset for record in source_records}
     if actual_assignments != assignments:
-        raise ValueError(
-            "Prepared source manifest assignments do not match persisted split"
-        )
+        raise ValueError("Prepared source manifest assignments do not match split.json")
     if black_background:
         _validate_black_background_dataset(manifest, dataset_root, set(assignments))
     train_records = [record for record in manifest.samples if record.subset == "train"]
@@ -402,6 +354,7 @@ def run_colony_training(
             f"Split must have non-empty train/val/test: "
             f"{len(train_records)}/{len(val_records)}/{len(test_records)}"
         )
+    source_signature = _tree_signature(dataset_root)
     if black_background:
         baseline_evaluation = evaluate_paired_model(
             baseline_model_path,
@@ -433,8 +386,7 @@ def run_colony_training(
     source_signature_after_training = _tree_signature(data_root)
     if source_signature_after_training != source_signature:
         raise RuntimeError(
-            "Read-only COCO source changed before checkpoint evaluation; "
-            "training report was stopped"
+            "Prepared dataset changed during training; checkpoint evaluation was stopped"
         )
     summary["training_source_sha256"] = source_signature
 
@@ -539,12 +491,10 @@ def run_colony_training(
         onnx_parity=onnx_parity,
     )
     report["source_signature"] = {
-        "before_import": source_signature,
-        "after_import": source_signature_after_import,
-        "after_run": None,
-        "unchanged": None,
+        "before_training": source_signature,
+        "after_training": source_signature_after_training,
+        "unchanged": True,
     }
-    report["prepared_dataset_reused"] = reuse_prepared_dataset
     report["cpu"].update(
         {
             "model": _cpu_model_name(),
@@ -557,18 +507,6 @@ def run_colony_training(
         report["resumed_from"] = str(_resume_checkpoint(resume_run))
 
     report_path = run_dir / "report.json"
-    source_signature_after_run = _tree_signature(data_root)
-    if source_signature_after_run != source_signature:
-        raise RuntimeError(
-            "Read-only COCO source changed during training/evaluation; "
-            "report promotion was stopped"
-        )
-    report["source_signature"] = {
-        "before_import": source_signature,
-        "after_import": source_signature_after_import,
-        "after_run": source_signature_after_run,
-        "unchanged": True,
-    }
     if paired_comparison is not None:
         split_ids = {
             subset: sorted(
@@ -599,7 +537,7 @@ def run_colony_training(
                 },
                 "source_provenance": {
                     "path": str(data_root.resolve()),
-                    "sha256": source_signature_after_run,
+                    "sha256": source_signature_after_training,
                     "hash_algorithm": "sha256",
                     "unchanged": True,
                 },

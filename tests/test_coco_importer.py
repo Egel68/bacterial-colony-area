@@ -1,10 +1,11 @@
 """Тесты импортёра датасета 22022540 (CocoBboxImporter)."""
 
-import json
 import hashlib
+import json
 
 import cv2
 import numpy as np
+import pytest
 
 from train.dataset_adapters import CocoBboxImporter, load_manifest
 
@@ -106,6 +107,7 @@ def test_importer_materializes_manifest(tmp_path):
         mask_path = out / sample.mask
         assert img_path.is_file()
         assert mask_path.is_file()
+        assert img_path.read_bytes() == (src / f"{sample.id}.jpg").read_bytes()
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         assert mask is not None
         assert set(np.unique(mask)) <= {0, 255}
@@ -208,11 +210,37 @@ def test_split_import_rejects_incomplete_source_images(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError, match="referenced by COCO is missing"):
         CocoBboxImporter().build(data_root=src, output_dir=out, split=True)
 
-    assert not (out / "dataset.json").exists()
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("corrupt", "Could not decode COCO source image"),
+        ("dimensions", "dimensions differ"),
+    ],
+)
+def test_split_import_preflights_corrupt_and_mismatched_images(
+    tmp_path, failure, message
+):
+    src = _make_source(tmp_path)
+    _add_third_annotated_image(src)
+    coco_path = src / "annot_COCO.json"
+    coco = json.loads(coco_path.read_text(encoding="utf-8"))
+    if failure == "corrupt":
+        (src / "sp02_img02.jpg").write_bytes(b"not an image")
+    else:
+        coco["images"][1]["width"] += 1
+        coco_path.write_text(json.dumps(coco), encoding="utf-8")
+    out = tmp_path / "out"
+
+    with pytest.raises(ValueError, match=message):
+        CocoBboxImporter().build(data_root=src, output_dir=out, split=True)
+
+    assert not out.exists()
 
 
 def test_split_import_rejects_output_nested_under_read_only_source(tmp_path):
-    import pytest
 
     src = _make_source(tmp_path)
     _add_third_annotated_image(src)
@@ -278,6 +306,7 @@ def test_black_background_pairs_preserve_split_geometry_and_source(
         assert source.dish == variant.dish
         assert source.mask == variant.mask
         assert variant.id == f"{source.id}__black_background"
+        assert variant.image.suffix == ".webp"
 
         source_image = cv2.imread(str(out_a / source.image), cv2.IMREAD_COLOR)
         black_image = cv2.imread(str(out_a / variant.image), cv2.IMREAD_COLOR)

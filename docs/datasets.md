@@ -74,9 +74,35 @@
   производных `cropped` записей. Это производный результат импорта, а не исходный
   Figshare-архив; importer растрирует bbox в приблизительные эллиптические маски
   (weak labels). Контрольные суммы локальных файлов с Figshare не сверялись.
-- **Повторный импорт:** полная инструкция и ограничения описаны в
-  [dataset-training-pipeline.md](dataset-training-pipeline.md). Для нового выхода
-  используйте отдельную папку, чтобы не перезаписывать нужную локальную копию:
+- **Подготовка полного обучающего snapshot:** используйте отдельную команду; она
+  сначала проверяет для каждого размеченного файла наличие, декодируемость и
+  совпадение размеров с COCO, затем создаёт маски, `dataset.json`, обязательный
+  воспроизводимый `split.json` и (по умолчанию) полноразмерные black-background
+  варианты в lossless WebP; пиксели сравниваются после чтения обратно. Исходные
+  изображения копируются байт-в-байт. Каталог `datasets/work/`
+  предназначен только для локального использования; инструменты не выполняют
+  `git add`, commit или push.
+
+  ```bash
+  UV_PROJECT_ENVIRONMENT=.venv-full uv sync --extra full
+  UV_PROJECT_ENVIRONMENT=.venv-full uv run --no-sync prepare-colony-training \
+    --data-root datasets/22022540 \
+    --output datasets/work/22022540-training-webp \
+    --seed 42 --train-ratio 0.70 --val-ratio 0.15 --test-ratio 0.15 \
+    --black-background
+  ```
+
+  Для набора без чёрнофоновых вариантов укажите `--no-black-background`. После
+  подготовки сверьте напечатанные числа с манифестом: локальный запуск на seed 42
+  обработал 369 source-изображений и 56 865 аннотаций, создал 369 source-записей,
+  369 black-background вариантов и 738 парных записей; split составил 253/62/54
+  source-группы для train/val/test. Параметры и ID source-групп сохранены в
+  `split.json`; варианты наследуют subset
+  исходника. Существующий `datasets/22022540_imported/` — старый импорт без split и
+  не является готовым training snapshot.
+- **Повторный импорт:** legacy-команда остаётся доступной для общего импорта COCO.
+  Полная инструкция и ограничения описаны в [dataset-training-pipeline.md](dataset-training-pipeline.md).
+  Для нового выхода используйте отдельную папку:
 
   ```bash
   uv run import-22022540 \
